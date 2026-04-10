@@ -1,6 +1,5 @@
-import { headers } from "next/headers";
-
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type Coin = {
   id: string;
@@ -12,6 +11,18 @@ type Coin = {
   total_volume: number;
   price_change_percentage_24h: number | null;
   price_change_percentage_7d_in_currency?: number | null;
+};
+
+type ScreenshotCoin = {
+  id: string;
+  symbol: string;
+  name: string;
+  image: string;
+  currentPrice: number;
+  marketCapRank: number | null;
+  totalVolume: number;
+  priceChange24hPct: number | null;
+  priceChange7dPct: number | null;
 };
 
 function usd(value: number | null | undefined) {
@@ -41,9 +52,12 @@ function emojiForTrend(value: number | null | undefined) {
   return value >= 0 ? "▲" : "▼";
 }
 
-const API_KEY = process.env.COINGECKO_API_KEY || "CG-URjRqWcx2fcJZn4toPV6WGBW";
+const API_KEY =
+  process.env.COINGECKO_API_KEY ||
+  process.env.NEXT_PUBLIC_COINGECKO_API_KEY ||
+  "CG-URjRqWcx2fcJZn4toPV6WGBW";
 
-async function getTop10(): Promise<Array<{ id: string; symbol: string; name: string; image: string; currentPrice: number; marketCapRank: number | null; totalVolume: number; priceChange24hPct: number | null; priceChange7dPct: number | null }>> {
+async function getTop10FromApi(): Promise<ScreenshotCoin[]> {
   const url =
     "https://api.coingecko.com/api/v3/coins/markets" +
     "?vs_currency=usd&per_page=250&page=1&sparkline=false&price_change_percentage=24h,7d";
@@ -57,9 +71,7 @@ async function getTop10(): Promise<Array<{ id: string; symbol: string; name: str
     cache: "no-store",
   });
 
-  if (!response.ok) {
-    throw new Error(`CoinGecko error ${response.status}`);
-  }
+  if (!response.ok) return [];
 
   const payload = (await response.json()) as Coin[];
   return payload
@@ -82,11 +94,72 @@ async function getTop10(): Promise<Array<{ id: string; symbol: string; name: str
     }));
 }
 
-export default async function ScreenshotPage() {
-  const h = await headers();
-  const seed = h.get("x-seed") || "";
+function parseCoinDataParam(raw: string): ScreenshotCoin[] | null {
+  const value = String(raw || "").trim();
+  if (!value) return null;
+
+  try {
+    const json = Buffer.from(value, "base64url").toString("utf-8");
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return null;
+
+    const normalized = parsed
+      .map((coin: unknown) => {
+        const item = coin as Record<string, unknown>;
+        return {
+          id: String(item?.id || ""),
+          symbol: String(item?.symbol || "").toUpperCase(),
+          name: String(item?.name || ""),
+          image: String(item?.image || ""),
+          currentPrice: Number(item?.currentPrice),
+          marketCapRank:
+            item?.marketCapRank === null || item?.marketCapRank === undefined
+              ? null
+              : Number(item.marketCapRank),
+          totalVolume: Number(item?.totalVolume),
+          priceChange24hPct:
+            item?.priceChange24hPct === null || item?.priceChange24hPct === undefined
+              ? null
+              : Number(item.priceChange24hPct),
+          priceChange7dPct:
+            item?.priceChange7dPct === null || item?.priceChange7dPct === undefined
+              ? null
+              : Number(item.priceChange7dPct),
+        };
+      })
+      .filter((coin: ScreenshotCoin) => coin.id && coin.name)
+      .slice(0, 10);
+
+    return normalized.length ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+export default async function ScreenshotPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ seed?: string; data?: string }>;
+}) {
+  const query = await searchParams;
+  const seed = String(query?.seed || "").trim();
   const dateLabel = new Date().toLocaleDateString("en-US");
-  const top10 = await getTop10();
+  const top10 = parseCoinDataParam(String(query?.data || "")) || (await getTop10FromApi());
+  const rows = top10.length
+    ? top10
+    : [
+        {
+          id: "placeholder",
+          name: "No Data",
+          symbol: "N/A",
+          image: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png",
+          currentPrice: 0,
+          marketCapRank: null,
+          totalVolume: 0,
+          priceChange24hPct: null,
+          priceChange7dPct: null,
+        },
+      ];
 
   return (
     <main
@@ -134,7 +207,7 @@ export default async function ScreenshotPage() {
       </div>
 
       <section style={{ marginTop: 8, display: "grid", height: 560, alignContent: "start" }}>
-        {top10.map((coin) => {
+        {rows.map((coin) => {
           const isUp = (coin.priceChange24hPct ?? 0) >= 0;
           return (
             <article

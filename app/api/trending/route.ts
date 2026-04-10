@@ -19,7 +19,10 @@ type MarketCoin = {
   last_updated?: string;
 };
 
-const API_KEY = process.env.COINGECKO_API_KEY || "CG-URjRqWcx2fcJZn4toPV6WGBW";
+const API_KEY =
+  process.env.COINGECKO_API_KEY ||
+  process.env.NEXT_PUBLIC_COINGECKO_API_KEY ||
+  "CG-URjRqWcx2fcJZn4toPV6WGBW";
 
 export async function GET() {
   const url =

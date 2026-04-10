@@ -2,6 +2,18 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+type TrendingCoin = {
+  id: string;
+  symbol: string;
+  name: string;
+  image: string;
+  currentPrice: number;
+  marketCapRank: number | null;
+  totalVolume: number;
+  priceChange24hPct: number | null;
+  priceChange7dPct: number | null;
+};
+
 function normalizeBaseUrl(value: string) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
@@ -73,6 +85,21 @@ async function getImageFromScreenshotService(renderUrl: string): Promise<{ bytes
   return { bytes, contentType };
 }
 
+async function fetchTop10ForRender(baseUrl: string): Promise<TrendingCoin[]> {
+  const response = await fetch(`${baseUrl}/api/trending`, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to fetch /api/trending: ${response.status} ${text.slice(0, 200)}`);
+  }
+
+  const payload = (await response.json()) as { coins?: TrendingCoin[] };
+  return Array.isArray(payload?.coins) ? payload.coins.slice(0, 10) : [];
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -91,7 +118,14 @@ export async function GET(req: Request) {
       );
     }
 
-    const renderUrl = `${renderBaseUrl}/screenshot?seed=${encodeURIComponent(`${Date.now()}-${Math.floor(Math.random() * 10000)}`)}`;
+    const top10 = await fetchTop10ForRender(renderBaseUrl);
+    if (!top10.length) {
+      return NextResponse.json({ error: "No trending coin data available for screenshot render." }, { status: 500 });
+    }
+
+    const seed = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const dataParam = Buffer.from(JSON.stringify(top10), "utf-8").toString("base64url");
+    const renderUrl = `${renderBaseUrl}/screenshot?seed=${encodeURIComponent(seed)}&data=${encodeURIComponent(dataParam)}`;
     const { bytes, contentType } = await getImageFromScreenshotService(renderUrl);
 
     const safeBytes = Uint8Array.from(bytes);
