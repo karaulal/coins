@@ -10,11 +10,27 @@ function currentDateMDY() {
   return `${month}/${day}/${year}`;
 }
 
+function currentPlus5Minutes() {
+  return new Date(Date.now() + 5 * 60 * 1000);
+}
+
+function timeSheets12h(d: Date) {
+  const hour24 = d.getUTCHours();
+  const hour12 = hour24 % 12 || 12;
+  const suffix = hour24 >= 12 ? "PM" : "AM";
+  const hour = String(hour12).padStart(2, "0");
+  const minute = String(d.getUTCMinutes()).padStart(2, "0");
+  const second = String(d.getUTCSeconds()).padStart(2, "0");
+  return `${hour}:${minute}:${second} ${suffix}`;
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as { fileUrl?: string; date?: string };
     const fileUrl = String(body?.fileUrl || "").trim();
     const date = String(body?.date || currentDateMDY()).trim();
+    const plus5 = currentPlus5Minutes();
+    const time = timeSheets12h(plus5);
 
     if (!fileUrl) {
       return NextResponse.json({ error: "fileUrl is required." }, { status: 400 });
@@ -23,7 +39,7 @@ export async function POST(req: Request) {
     const webhookRes = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ date, fileUrl }),
+      body: JSON.stringify({ date, fileUrl, time }),
     });
 
     if (!webhookRes.ok) {
@@ -33,7 +49,7 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, status: webhookRes.status });
+    return NextResponse.json({ ok: true, status: webhookRes.status, time });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unable to send webhook request.";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -187,7 +187,7 @@ export default function Home() {
         <button onClick={fetchTrendingCoins} disabled={loading}>
           {loading ? "Fetching..." : "Fetch Trending Coins"}
         </button>
-        <button onClick={sendImageToWebhook} disabled={loading || sendingImage || (!imageFile && !imageRenderUrl)}>
+        <button onClick={sendImageToWebhook} disabled={sendingImage || (!imageFile && !imageRenderUrl)}>
           {sendingImage ? "Sending..." : "Send image"}
         </button>
 
