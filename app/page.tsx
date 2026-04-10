@@ -87,25 +87,31 @@ export default function Home() {
 
       const ts = Date.now();
       const serviceImageFileUrl = `${window.location.origin}/api/screenshot/build?t=${ts}`;
-      const serviceImageUrl = `${window.location.origin}/screenshot?t=${ts}`;
-      setImageRenderUrl(serviceImageUrl);
-      setImageFile(serviceImageFileUrl);
 
       const fileName = `trending-coins-${new Date().toISOString().slice(0, 10)}.png`;
       const imagePath = `dailytrend/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${fileName}`;
+
+      const screenshotResponse = await fetch(serviceImageFileUrl, { method: "GET" });
+      if (!screenshotResponse.ok) {
+        const screenshotError = await screenshotResponse.json().catch(() => ({}));
+        throw new Error(String(screenshotError?.error || "Screenshot service failed."));
+      }
+
+      const blob = await screenshotResponse.blob();
+      const imageRef = ref(storage, imagePath);
+      await uploadBytes(imageRef, blob, { contentType: "image/png" });
+      const publicImageUrl = await getDownloadURL(imageRef);
+
+      setImageRenderUrl(publicImageUrl);
+      setImageFile(publicImageUrl);
 
       const persistResponse = await fetch("/api/dailytrend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fetchedAt: snapshotDateMDY(),
-          imageUrl: serviceImageUrl,
-          imageFile: serviceImageFileUrl,
-          imageRenderUrl: serviceImageUrl,
-          imageBuildUrl: serviceImageFileUrl,
-          imageStorageUrl: null,
-          imageStoragePath: null,
-          imageFileName: fileName,
+          imageUrl: publicImageUrl,
+          imageFile: publicImageUrl,
           source: "coingecko/coins/markets",
           coins: nextCoins,
         }),
@@ -118,22 +124,6 @@ export default function Home() {
 
       setSavedDocId(String(persistPayload?.id || ""));
       setSavedAt(new Date().toLocaleString());
-
-      const screenshotResponse = await fetch(serviceImageFileUrl, { method: "GET" });
-      if (!screenshotResponse.ok) {
-        const screenshotError = await screenshotResponse.json().catch(() => ({}));
-        throw new Error(String(screenshotError?.error || "Screenshot service failed."));
-      }
-
-      const blob = await screenshotResponse.blob();
-
-      try {
-        const imageRef = ref(storage, imagePath);
-        await uploadBytes(imageRef, blob, { contentType: "image/png" });
-        await getDownloadURL(imageRef);
-      } catch {
-        // Keep screenshot-service URL fallback if storage upload is blocked.
-      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong.";
       setError(message);

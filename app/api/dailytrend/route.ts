@@ -40,11 +40,6 @@ export async function POST(req: Request) {
       fetchedAt?: string;
       imageUrl?: string;
       imageFile?: string;
-      imageRenderUrl?: string;
-      imageBuildUrl?: string;
-      imageStorageUrl?: string | null;
-      imageStoragePath?: string | null;
-      imageFileName?: string;
       source?: string;
       coins?: CoinInput[];
     };
@@ -80,11 +75,6 @@ export async function POST(req: Request) {
       fetchedAtIso: new Date().toISOString(),
       imageUrl: body?.imageUrl || "",
       imageFile: body?.imageFile || "",
-      imageRenderUrl: body?.imageRenderUrl || "",
-      imageBuildUrl: body?.imageBuildUrl || "",
-      imageStorageUrl: body?.imageStorageUrl ?? null,
-      imageStoragePath: body?.imageStoragePath ?? null,
-      imageFileName: body?.imageFileName || "",
       source: body?.source || "coingecko/coins/markets",
       totalCoins: coins.length,
       coins: nestedCoins,
