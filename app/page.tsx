@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { initAnalytics, storage } from "@/lib/firebase";
+import { initAnalytics } from "@/lib/firebase";
 import TrendingScreenshotCard from "@/components/TrendingScreenshotCard";
 
 function snapshotDateMDY() {
@@ -85,22 +84,21 @@ export default function Home() {
         return;
       }
 
-      const ts = Date.now();
-      const serviceImageFileUrl = `${window.location.origin}/api/screenshot/build?t=${ts}`;
+      const createResponse = await fetch("/api/screenshot/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coins: nextCoins.slice(0, 10) }),
+      });
 
-      const fileName = `trending-coins-${new Date().toISOString().slice(0, 10)}.png`;
-      const imagePath = `dailytrend/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${fileName}`;
-
-      const screenshotResponse = await fetch(serviceImageFileUrl, { method: "GET" });
-      if (!screenshotResponse.ok) {
-        const screenshotError = await screenshotResponse.json().catch(() => ({}));
-        throw new Error(String(screenshotError?.error || "Screenshot service failed."));
+      const createPayload = await createResponse.json().catch(() => ({}));
+      if (!createResponse.ok) {
+        throw new Error(String(createPayload?.error || "Screenshot service failed."));
       }
 
-      const blob = await screenshotResponse.blob();
-      const imageRef = ref(storage, imagePath);
-      await uploadBytes(imageRef, blob, { contentType: "image/png" });
-      const publicImageUrl = await getDownloadURL(imageRef);
+      const publicImageUrl = String(createPayload?.imageUrl || "").trim();
+      if (!publicImageUrl) {
+        throw new Error("Screenshot was generated but no public image URL was returned.");
+      }
 
       setImageRenderUrl(publicImageUrl);
       setImageFile(publicImageUrl);
@@ -112,7 +110,7 @@ export default function Home() {
           fetchedAt: snapshotDateMDY(),
           imageUrl: publicImageUrl,
           imageFile: publicImageUrl,
-          source: "coingecko/coins/markets",
+          source: "coingecko/coins/markets+storage",
           coins: nextCoins,
         }),
       });

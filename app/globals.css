@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;800;900&display=swap");
+
 :root {
   --bg: #f4efe7;
   --ink: #121212;
@@ -35,7 +37,7 @@ a {
 
 .page-wrap {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: fit-content(360px) minmax(0, 1fr);
   gap: 18px;
   padding: 18px;
 }
@@ -54,6 +56,9 @@ a {
   display: grid;
   gap: 12px;
   align-content: start;
+  width: fit-content;
+  max-width: min(100%, 360px);
+  justify-self: start;
 }
 
 .control-panel h1 {
@@ -102,12 +107,16 @@ a {
   display: grid;
   gap: 8px;
   font-size: 13px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .preview-box {
   padding: 10px;
   display: grid;
   gap: 8px;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .preview-box h2 {
@@ -115,7 +124,13 @@ a {
 }
 
 .preview-box img {
-  width: 100%;
+  width: 300px;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 540 / 750;
+  object-fit: contain;
+  object-position: center;
+  display: block;
   border-radius: 10px;
   border: 1px solid var(--line);
 }
@@ -124,10 +139,13 @@ a {
   padding: 12px;
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .table-wrap {
   padding: 10px;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .table-wrap h2 {
@@ -359,6 +377,459 @@ td {
 .shot-price {
   font-weight: 800;
   color: #0f172a;
+}
+
+.shot-price-strong {
+  font-weight: 800;
+}
+
+.shot-grid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+
+.shot-box {
+  position: relative;
+  border: 1px solid #d9e6fa;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+  border-radius: 14px;
+  padding: 8px 8px 7px;
+  min-height: 165px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.shot-box-name-top {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.1;
+  text-align: left;
+  margin: 0 28px 6px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shot-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #0f2f5a;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.shot-box-head {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 7px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.shot-box-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid #d9e6fa;
+  background: #fff;
+}
+
+.shot-box-title {
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shot-box-symbol {
+  grid-column: 2 / 3;
+  margin-top: -1px;
+  font-size: 13px;
+  color: #587095;
+  font-weight: 600;
+}
+
+.shot-box-line {
+  font-size: 13px;
+  line-height: 1.25;
+  color: #334a6b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shot-box-line-24h {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.shot-box-bottom {
+  margin-top: auto;
+  display: grid;
+  gap: 2px;
+}
+
+.shot-box-line-split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shot-funnel-wrap {
+  margin-top: 8px;
+  display: grid;
+  place-items: stretch;
+  font-family: "Montserrat", "Noto Sans", "Segoe UI", sans-serif;
+}
+
+.shot-funnel {
+  width: 100%;
+  display: grid;
+  gap: 0;
+  height: 500px;
+  border: 1px solid #b8c1cf;
+  border-radius: 14px;
+  overflow: hidden;
+  clip-path: polygon(4% 0%, 96% 0%, 80% 100%, 20% 100%);
+  background: #f4f7fb;
+}
+
+.shot-funnel-row {
+  --edge-inset: 0px;
+  display: grid;
+  grid-template-columns: 1fr 38px 1.5fr;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 14px;
+  padding-right: 14px;
+  color: #1f2937;
+  border-top: 1px solid #c7d0de;
+}
+
+.shot-funnel-center-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid #ffffff;
+  box-shadow: 0 1px 4px #00000026;
+  object-fit: cover;
+  justify-self: center;
+  align-self: center;
+}
+
+.shot-funnel-center-gap {
+  width: 30px;
+  height: 30px;
+  display: block;
+  justify-self: center;
+}
+
+.shot-funnel-row:first-child {
+  border-top: 0;
+}
+
+.shot-funnel-left {
+  display: grid;
+  justify-items: start;
+  align-content: center;
+  gap: 1px;
+  min-width: 0;
+  margin-left: calc(24px + var(--edge-inset));
+}
+
+.shot-funnel-symbol {
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.shot-funnel-trend {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.shot-funnel-right {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  margin-right: calc(24px + var(--edge-inset));
+}
+
+.shot-funnel-right p {
+  font-size: 13px;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shot-funnel-row:nth-child(1) { --edge-inset: 0px; background: #eaf3ff; }
+.shot-funnel-row:nth-child(2) { --edge-inset: 3px; background: #ecf9ef; }
+.shot-funnel-row:nth-child(3) { --edge-inset: 8px; background: #fff5e7; }
+.shot-funnel-row:nth-child(4) { --edge-inset: 15px; background: #f7efff; }
+.shot-funnel-row:nth-child(5) { --edge-inset: 24px; background: #e9f9fb; }
+.shot-funnel-row:nth-child(6) { --edge-inset: 35px; background: #fff2f0; }
+.shot-funnel-row:nth-child(7) { --edge-inset: 48px; background: #eef2ff; }
+.shot-funnel-row:nth-child(8) { --edge-inset: 63px; background: #f0fae9; }
+.shot-funnel-row:nth-child(9) { --edge-inset: 80px; background: #f9eef7; }
+
+.shot-heatmap {
+  margin-top: 8px;
+  position: relative;
+  height: 500px;
+  border: 1px solid #c7ced8;
+  background: #e9edf3;
+  overflow: hidden;
+  font-family: "Montserrat", "Noto Sans", "Segoe UI", sans-serif;
+}
+
+.shot-heat-cell {
+  position: absolute;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 0;
+  padding: 8px;
+  color: #1f2a38;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  box-shadow: inset 0 0 0 1px #c7ced8;
+  text-shadow: none;
+}
+
+.shot-heat-title {
+  font-size: 33px;
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+}
+
+.shot-heat-trend {
+  font-size: 32px;
+  font-weight: 900;
+}
+
+.shot-heat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.shot-heat-meta {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.shot-heat-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid #ffffff;
+  background: #fff;
+  object-fit: cover;
+}
+
+.shot-heat-cell.is-small .shot-heat-title {
+  font-size: 19px;
+}
+
+.shot-heat-cell.is-small .shot-heat-trend {
+  font-size: 24px;
+}
+
+.shot-heat-cell.is-small .shot-heat-logo {
+  width: 18px;
+  height: 18px;
+}
+
+.shot-footer-heatmap {
+  height: 70px;
+}
+
+.shot-bubble-stage {
+  margin-top: 8px;
+  position: relative;
+  height: 500px;
+  border-radius: 14px;
+  border: 1px solid #d2d9e4;
+  background:
+    repeating-linear-gradient(0deg, rgba(95, 114, 140, 0.09) 0, rgba(95, 114, 140, 0.09) 1px, transparent 1px, transparent 32px),
+    repeating-linear-gradient(90deg, rgba(95, 114, 140, 0.09) 0, rgba(95, 114, 140, 0.09) 1px, transparent 1px, transparent 32px),
+    #ffffff;
+  overflow: hidden;
+}
+
+.shot-axis {
+  display: none;
+}
+
+.shot-axis.x {
+  left: 26px;
+  right: 22px;
+  bottom: 26px;
+  height: 1px;
+}
+
+.shot-axis.y {
+  left: 26px;
+  top: 22px;
+  bottom: 26px;
+  width: 1px;
+}
+
+.shot-bubble {
+  position: absolute;
+  border-radius: 999px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #ffffff;
+  font-size: var(--bubble-font-size, 12px);
+  font-weight: var(--bubble-font-weight, 700);
+  border: 1px solid #ffffff66;
+  box-shadow: 0 10px 20px #0a234540;
+  text-align: center;
+  padding: 6px;
+  line-height: 1;
+  white-space: nowrap;
+  background: radial-gradient(circle at 28% 22%, #374151, #0f172a);
+  overflow: visible;
+  font-family: "Montserrat", "Noto Sans", "Segoe UI", sans-serif;
+}
+
+.shot-bubble small {
+  font-size: var(--bubble-sub-size, 10px);
+  font-weight: var(--bubble-font-weight, 700);
+  color: #e6edf7;
+  white-space: nowrap;
+}
+
+.shot-bubble .shot-bubble-trend {
+  color: #22c55e;
+}
+
+.shot-bubble-coin {
+  position: absolute;
+  left: -9px;
+  top: -9px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  background: #fff;
+  object-fit: cover;
+}
+
+.shot-footer-bubbles {
+  height: 70px;
+}
+
+.shot-bar-chart {
+  margin-top: 8px;
+  height: 500px;
+  border-radius: 14px;
+  border: 1px solid #dce6f8;
+  background: linear-gradient(180deg, #f8fbff, #eef4ff);
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+  gap: 3px;
+  align-items: stretch;
+  align-content: stretch;
+  padding: 10px 8px;
+  font-family: "Montserrat", "Noto Sans", "Segoe UI", sans-serif;
+}
+
+.shot-bar-col {
+  display: grid;
+  justify-items: stretch;
+  align-content: stretch;
+  gap: 4px;
+  grid-template-rows: 1fr auto auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.shot-bar-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
+}
+
+.shot-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  border-radius: 10px 10px 4px 4px;
+}
+
+.shot-bar-col p {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.shot-bar-col small {
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.shot-bar-trend {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--bar-height, 0%) + 4px);
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  text-align: center;
+  pointer-events: none;
+}
+
+.shot-bar-price {
+  font-size: 11px;
+  color: #0f172a;
+}
+
+.shot-bar-name {
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+
+.shot-bar-price {
+  text-align: center;
 }
 
 .shot-footer {

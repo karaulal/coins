@@ -1,6 +1,7 @@
 import TrendingScreenshotCard from "@/components/TrendingScreenshotCard";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import type { CardVariant } from "@/components/TrendingScreenshotCard";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -35,6 +36,24 @@ function snapshotDateMDY() {
   const day = String(d.getUTCDate()).padStart(2, "0");
   const year = d.getUTCFullYear();
   return `${month}/${day}/${year}`;
+}
+
+const ALL_VARIANTS: CardVariant[] = [
+  "list",
+  "grid",
+  "funnel",
+  "heatmap",
+  "bubbles",
+  "bars",
+];
+
+function pickVariant(forced?: string): CardVariant {
+  if (forced && ALL_VARIANTS.includes(forced as CardVariant)) {
+    return forced as CardVariant;
+  }
+
+  const index = Math.floor(Math.random() * ALL_VARIANTS.length);
+  return ALL_VARIANTS[index];
 }
 
 async function getBaseUrl() {
@@ -163,12 +182,13 @@ function parseCoinDataParam(raw: string): ScreenshotCoin[] | null {
 export default async function ScreenshotPage({
   searchParams,
 }: {
-  searchParams: Promise<{ seed?: string; data?: string }>;
+  searchParams: Promise<{ seed?: string; data?: string; variant?: string }>;
 }) {
   const query = await searchParams;
   const seed = String(query?.seed || "shot").trim();
   const dateLabel = snapshotDateMDY();
   const top10 = parseCoinDataParam(String(query?.data || "")) || (await getTop10FromApi());
+  const variant = pickVariant(String(query?.variant || "").trim());
   const rows = top10.length
     ? top10
     : [
@@ -197,7 +217,12 @@ export default async function ScreenshotPage({
           '"Noto Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Arial Unicode MS","Segoe UI Symbol",sans-serif',
       }}
     >
-      <TrendingScreenshotCard coins={rows} snapshotLabel={dateLabel} keyPrefix={seed} />
+      <TrendingScreenshotCard
+        coins={rows}
+        snapshotLabel={dateLabel}
+        keyPrefix={seed}
+        variant={variant}
+      />
     </main>
   );
 }
