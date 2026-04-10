@@ -33,39 +33,56 @@ function resolveRenderBaseUrl(url: URL): string {
   return `${url.protocol}//${url.host}`;
 }
 
-async function getImageFromScreenshotService(renderUrl: string): Promise<{ bytes: Buffer; contentType: string }> {
+async function getImageFromScreenshotService(
+  renderUrl: string,
+  options?: { width?: number; height?: number; delayMs?: number }
+): Promise<{ bytes: Buffer; contentType: string; requestMode: "full" | "fallback" }> {
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), 90_000);
+  const width = Math.max(540, Math.trunc(Number(options?.width || 540)));
+  const height = Math.max(750, Math.trunc(Number(options?.height || 750)));
+  const delayMs = Math.max(0, Math.trunc(Number(options?.delayMs ?? 2000)));
 
   let response: Response;
+  let requestMode: "full" | "fallback" = "full";
   try {
     const service = "https://bubble2-797487328877.europe-west1.run.app/screenshot";
+    const fullPayload = {
+      url: renderUrl,
+      width,
+      height,
+      fullPage: false,
+      type: "png",
+      waitUntil: "networkidle",
+      delayMs,
+    };
+
     response = await fetch(service, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Accept: "image/png,image/*;q=0.9,*/*;q=0.8",
+        Accept: "image/png",
       },
-      body: JSON.stringify({
-        url: renderUrl,
-        width: 540,
-        height: 750,
-        fullPage: false,
-        type: "png",
-        waitUntil: "networkidle",
-        delayMs: 2000,
-      }),
+      body: JSON.stringify(fullPayload),
       signal: controller.signal,
     });
 
     if (!response.ok && [400, 404, 405, 415, 422].includes(Number(response.status))) {
+      requestMode = "fallback";
       response = await fetch(service, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Accept: "image/png,image/*;q=0.9,*/*;q=0.8",
+          Accept: "image/png",
         },
-        body: JSON.stringify({ url: renderUrl }),
+        body: JSON.stringify({
+          url: renderUrl,
+          width,
+          height,
+          type: "png",
+          waitUntil: "networkidle",
+          delayMs,
+        }),
         signal: controller.signal,
       });
     }
@@ -82,7 +99,7 @@ async function getImageFromScreenshotService(renderUrl: string): Promise<{ bytes
   if (!bytes.length) throw new Error("Screenshot service returned an empty image.");
 
   const contentType = String(response.headers.get("content-type") || "image/png").trim() || "image/png";
-  return { bytes, contentType };
+  return { bytes, contentType, requestMode };
 }
 
 async function fetchTop10ForRender(baseUrl: string): Promise<TrendingCoin[]> {
@@ -123,10 +140,15 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "No trending coin data available for screenshot render." }, { status: 500 });
     }
 
-    const seed = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const now = Date.now();
+    const seed = `${now}-${Math.floor(Math.random() * 10000)}`;
     const dataParam = Buffer.from(JSON.stringify(top10), "utf-8").toString("base64url");
-    const renderUrl = `${renderBaseUrl}/screenshot?seed=${encodeURIComponent(seed)}&data=${encodeURIComponent(dataParam)}`;
-    const { bytes, contentType } = await getImageFromScreenshotService(renderUrl);
+    const renderUrl = `${renderBaseUrl}/screenshot?seed=${encodeURIComponent(seed)}&v=${now}&data=${encodeURIComponent(dataParam)}`;
+    const { bytes, contentType, requestMode } = await getImageFromScreenshotService(renderUrl, {
+      width: 540,
+      height: 750,
+      delayMs: 2000,
+    });
 
     const safeBytes = Uint8Array.from(bytes);
     const body = new Blob([safeBytes], { type: contentType });
@@ -137,6 +159,8 @@ export async function GET(req: Request) {
         "Content-Type": contentType,
         "Cache-Control": "no-store",
         "Content-Length": String(bytes.length),
+        "X-Render-Base-Url": renderBaseUrl,
+        "X-Screenshot-Mode": requestMode,
       },
     });
   } catch (error: unknown) {

@@ -1,9 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { db, initAnalytics, storage } from "@/lib/firebase";
+import { initAnalytics, storage } from "@/lib/firebase";
+import TrendingScreenshotCard from "@/components/TrendingScreenshotCard";
+
+function snapshotDateMDY() {
+  const d = new Date();
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const year = d.getUTCFullYear();
+  return `${month}/${day}/${year}`;
+}
 
 type Coin = {
   rankByTrend: number;
@@ -38,17 +46,14 @@ function compact(value: number | null | undefined) {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
-function emojiForTrend(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "•";
-  return value >= 0 ? "▲" : "▼";
-}
-
 export default function Home() {
   const [coins, setCoins] = useState<Coin[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sendingImage, setSendingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [imageUrl, setImageUrl] = useState<string>("");
+  const [webhookMessage, setWebhookMessage] = useState<string>("");
   const [imageFile, setImageFile] = useState<string>("");
+  const [imageRenderUrl, setImageRenderUrl] = useState<string>("");
   const [savedDocId, setSavedDocId] = useState<string>("");
   const [savedAt, setSavedAt] = useState<string>("");
 
@@ -59,6 +64,9 @@ export default function Home() {
     setError(null);
     setSavedDocId("");
     setSavedAt("");
+    setImageFile("");
+    setImageRenderUrl("");
+    setWebhookMessage("");
 
     try {
       await initAnalytics();
@@ -77,60 +85,96 @@ export default function Home() {
         return;
       }
 
-      const screenshotResponse = await fetch("/api/screenshot/build", { method: "GET" });
+      const ts = Date.now();
+      const serviceImageFileUrl = `${window.location.origin}/api/screenshot/build?t=${ts}`;
+      const serviceImageUrl = `${window.location.origin}/screenshot?t=${ts}`;
+      setImageRenderUrl(serviceImageUrl);
+      setImageFile(serviceImageFileUrl);
+
+      const fileName = `trending-coins-${new Date().toISOString().slice(0, 10)}.png`;
+      const imagePath = `dailytrend/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${fileName}`;
+
+      const persistResponse = await fetch("/api/dailytrend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fetchedAt: snapshotDateMDY(),
+          imageUrl: serviceImageUrl,
+          imageFile: serviceImageFileUrl,
+          imageRenderUrl: serviceImageUrl,
+          imageBuildUrl: serviceImageFileUrl,
+          imageStorageUrl: null,
+          imageStoragePath: null,
+          imageFileName: fileName,
+          source: "coingecko/coins/markets",
+          coins: nextCoins,
+        }),
+      });
+
+      const persistPayload = await persistResponse.json().catch(() => ({}));
+      if (!persistResponse.ok) {
+        throw new Error(String(persistPayload?.error || "Failed to save daily trend entry."));
+      }
+
+      setSavedDocId(String(persistPayload?.id || ""));
+      setSavedAt(new Date().toLocaleString());
+
+      const screenshotResponse = await fetch(serviceImageFileUrl, { method: "GET" });
       if (!screenshotResponse.ok) {
         const screenshotError = await screenshotResponse.json().catch(() => ({}));
         throw new Error(String(screenshotError?.error || "Screenshot service failed."));
       }
 
       const blob = await screenshotResponse.blob();
-      const fileName = `trending-coins-${new Date().toISOString().slice(0, 10)}.png`;
-      const imagePath = `dailytrend/${new Date().toISOString().slice(0, 10)}/${Date.now()}-${fileName}`;
-      const imageRef = ref(storage, imagePath);
-      await uploadBytes(imageRef, blob, { contentType: "image/png" });
-      const downloadUrl = await getDownloadURL(imageRef);
 
-      setImageUrl(downloadUrl);
-      setImageFile(imagePath);
-
-      const nestedCoins = nextCoins.reduce<Record<string, unknown>>((acc, coin, idx) => {
-        acc[`coin${idx + 1}`] = {
-          id: coin.id,
-          name: coin.name,
-          symbol: coin.symbol,
-          price: coin.currentPrice,
-          priceChange24hPct: coin.priceChange24hPct,
-          priceChange7dPct: coin.priceChange7dPct,
-          marketCapRank: coin.marketCapRank,
-          marketCap: coin.marketCap,
-          totalVolume: coin.totalVolume,
-          high24h: coin.high24h,
-          low24h: coin.low24h,
-          image: coin.image,
-          lastUpdated: coin.lastUpdated,
-        };
-        return acc;
-      }, {});
-
-      const docRef = await addDoc(collection(db, "dailytrend"), {
-        title: "TRENDING COINS LAST 24 HOURS",
-        createdAt: serverTimestamp(),
-        fetchedAtIso: new Date().toISOString(),
-        imageUrl: downloadUrl,
-        imageFile: imagePath,
-        imageFileName: fileName,
-        source: "coingecko/coins/markets",
-        totalCoins: nextCoins.length,
-        coins: nestedCoins,
-      });
-
-      setSavedDocId(docRef.id);
-      setSavedAt(new Date().toLocaleString());
+      try {
+        const imageRef = ref(storage, imagePath);
+        await uploadBytes(imageRef, blob, { contentType: "image/png" });
+        await getDownloadURL(imageRef);
+      } catch {
+        // Keep screenshot-service URL fallback if storage upload is blocked.
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong.";
       setError(message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function sendImageToWebhook() {
+    const fileUrl = imageFile || imageRenderUrl;
+    if (!fileUrl) {
+      setError("Generate an image first, then click Send image.");
+      return;
+    }
+
+    setSendingImage(true);
+    setError(null);
+    setWebhookMessage("");
+
+    try {
+      const response = await fetch("/api/webhook/send-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileUrl,
+          date: snapshotDateMDY(),
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(String(payload?.error || "Failed to send image to webhook."));
+      }
+
+      const status = payload?.status ? ` (HTTP ${payload.status})` : "";
+      setWebhookMessage(`Webhook sent successfully${status}.`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to send image to webhook.";
+      setError(message);
+    } finally {
+      setSendingImage(false);
     }
   }
 
@@ -143,16 +187,20 @@ export default function Home() {
         <button onClick={fetchTrendingCoins} disabled={loading}>
           {loading ? "Fetching..." : "Fetch Trending Coins"}
         </button>
+        <button onClick={sendImageToWebhook} disabled={loading || sendingImage || (!imageFile && !imageRenderUrl)}>
+          {sendingImage ? "Sending..." : "Send image"}
+        </button>
 
         {error ? <p className="error-box">{error}</p> : null}
         {savedDocId ? <p className="ok-box">Saved in dailytrend, entry id: {savedDocId} ({savedAt})</p> : null}
+        {webhookMessage ? <p className="ok-box">{webhookMessage}</p> : null}
 
         <div className="link-grid">
           <div>
             <strong>imageUrl:</strong>{" "}
-            {imageUrl ? (
-              <a href={imageUrl} target="_blank" rel="noreferrer">
-                Open generated image
+            {imageRenderUrl ? (
+              <a href={imageRenderUrl} target="_blank" rel="noreferrer">
+                {imageRenderUrl}
               </a>
             ) : (
               <span>-</span>
@@ -160,8 +208,8 @@ export default function Home() {
           </div>
           <div>
             <strong>imageFile:</strong>{" "}
-            {imageUrl && imageFile ? (
-              <a href={imageUrl} download={imageFile.split("/").pop() || "trending-coins.png"}>
+            {imageFile ? (
+              <a href={imageFile} target="_blank" rel="noreferrer">
                 {imageFile}
               </a>
             ) : (
@@ -172,7 +220,7 @@ export default function Home() {
 
         <div className="preview-box">
           <h2>Generated Preview</h2>
-          {imageUrl ? <img src={imageUrl} alt="Generated trending coins preview" /> : <p>No image generated yet.</p>}
+          {imageFile ? <img src={imageFile} alt="Generated trending coins preview" /> : <p>No image generated yet.</p>}
         </div>
       </section>
 
@@ -221,42 +269,21 @@ export default function Home() {
         </div>
 
         <div className="screenshot-shell">
-          <div className="screenshot-canvas">
-            <section className="shot-header">
-              <p className="shot-kicker">TRENDING COINS</p>
-              <h3>TRENDING COINS LAST 24 HOURS</h3>
-              <p className="shot-sub">Top movers ranked by 24h momentum</p>
-            </section>
-
-            <div className="shot-pills">
-              <span className="pill dark">Snapshot: {new Date().toLocaleDateString()}</span>
-            </div>
-
-            <section className="shot-list">
-              {top10.map((coin) => {
-                const isUp = (coin.priceChange24hPct ?? 0) >= 0;
-                return (
-                  <article key={`shot-${coin.id}`} className="shot-row">
-                    <img src={coin.image} alt={coin.name} className="shot-logo" />
-                    <div className="shot-content">
-                      <p className="shot-title">
-                        {coin.name} ({coin.symbol})
-                        <span className={isUp ? "up" : "down"}>
-                          {" "}
-                          {emojiForTrend(coin.priceChange24hPct)} {pct(coin.priceChange24hPct)}
-                        </span>
-                      </p>
-                      <p className="shot-meta">
-                        {emojiForTrend(coin.priceChange7dPct)} 7d {pct(coin.priceChange7dPct)} | Price <span className="shot-price">{usd(coin.currentPrice)}</span> | Vol {compact(coin.totalVolume)} | Rank #{coin.marketCapRank ?? "-"}
-                      </p>
-                    </div>
-                  </article>
-                );
-              })}
-            </section>
-
-            <footer className="shot-footer">Source: CoinGecko markets API | Size: 540 x 750</footer>
-          </div>
+          <TrendingScreenshotCard
+            coins={top10.map((coin) => ({
+              id: coin.id,
+              name: coin.name,
+              symbol: coin.symbol,
+              image: coin.image,
+              currentPrice: coin.currentPrice,
+              marketCapRank: coin.marketCapRank,
+              totalVolume: coin.totalVolume,
+              priceChange24hPct: coin.priceChange24hPct,
+              priceChange7dPct: coin.priceChange7dPct,
+            }))}
+            snapshotLabel={snapshotDateMDY()}
+            keyPrefix="home"
+          />
         </div>
       </section>
     </main>

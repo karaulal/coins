@@ -182,15 +182,93 @@ td {
   border-radius: 14px;
   overflow: hidden;
   padding: 8px;
+  font-family:
+    "Noto Sans",
+    "Noto Sans CJK SC",
+    "Noto Sans SC",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    "Arial Unicode MS",
+    "Segoe UI Symbol",
+    sans-serif;
 }
 
 .shot-header {
+  position: relative;
+  overflow: hidden;
   border-radius: 14px;
   color: #fff;
   padding: 14px;
   background:
     radial-gradient(circle at 85% 10%, rgba(255, 255, 255, 0.3), transparent 30%),
     linear-gradient(135deg, #0f172a, #2563eb);
+}
+
+.shot-bg-icons {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.shot-bg-icons img {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  opacity: 0.18;
+  filter: saturate(0.85) blur(0.2px);
+}
+
+.shot-bg-icons img:nth-child(1) {
+  top: 10px;
+  left: 14px;
+}
+
+.shot-bg-icons img:nth-child(2) {
+  top: 8px;
+  right: 20px;
+  opacity: 1;
+  filter: none;
+}
+
+.shot-bg-icons img:nth-child(3) {
+  top: 42px;
+  right: 120px;
+}
+
+.shot-bg-icons img:nth-child(4) {
+  bottom: 8px;
+  left: 120px;
+}
+
+.shot-bg-icons img:nth-child(5) {
+  bottom: 12px;
+  right: 36px;
+}
+
+.shot-bg-icons img:nth-child(6) {
+  top: 22px;
+  left: 210px;
+}
+
+.shot-bg-icons img:nth-child(7) {
+  top: 56px;
+  left: 310px;
+}
+
+.shot-bg-icons img:nth-child(8) {
+  bottom: 16px;
+  left: 250px;
+}
+
+.shot-bg-icons img:nth-child(9) {
+  bottom: 14px;
+  right: 150px;
+}
+
+.shot-header > *:not(.shot-bg-icons) {
+  position: relative;
+  z-index: 1;
 }
 
 .shot-kicker {
@@ -217,6 +295,8 @@ td {
   display: flex;
   justify-content: space-between;
   padding: 0 8px;
+  position: relative;
+  z-index: 5;
 }
 
 .pill {
@@ -239,7 +319,6 @@ td {
   margin-top: 8px;
   display: grid;
   align-content: start;
-  height: 560px;
 }
 
 .shot-row {
@@ -262,8 +341,10 @@ td {
 .shot-title {
   font-size: 16px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.15;
   color: #0f172a;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .shot-meta {
@@ -281,14 +362,14 @@ td {
 }
 
 .shot-footer {
-  margin-top: 8px;
+  margin-top: 2px;
   height: 38px;
   border-radius: 10px;
   background: #09111f;
   color: #fff;
   display: grid;
   place-items: center;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 700;
 }
 

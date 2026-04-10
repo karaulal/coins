@@ -19,12 +19,16 @@ type MarketCoin = {
   last_updated?: string;
 };
 
-const API_KEY =
-  process.env.COINGECKO_API_KEY ||
-  process.env.NEXT_PUBLIC_COINGECKO_API_KEY ||
-  "CG-URjRqWcx2fcJZn4toPV6WGBW";
+const API_KEY = process.env.COINGECKO_API_KEY || process.env.NEXT_PUBLIC_COINGECKO_API_KEY;
 
 export async function GET() {
+  if (!API_KEY) {
+    return NextResponse.json(
+      { error: "Missing COINGECKO_API_KEY environment variable." },
+      { status: 500 }
+    );
+  }
+
   const url =
     "https://api.coingecko.com/api/v3/coins/markets" +
     "?vs_currency=usd&per_page=250&page=1&sparkline=false&price_change_percentage=1h,24h,7d";

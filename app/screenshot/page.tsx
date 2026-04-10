@@ -1,17 +1,9 @@
+import TrendingScreenshotCard from "@/components/TrendingScreenshotCard";
+import type { Metadata } from "next";
+import { headers } from "next/headers";
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-type Coin = {
-  id: string;
-  symbol: string;
-  name: string;
-  image: string;
-  current_price: number;
-  market_cap_rank: number | null;
-  total_volume: number;
-  price_change_percentage_24h: number | null;
-  price_change_percentage_7d_in_currency?: number | null;
-};
 
 type ScreenshotCoin = {
   id: string;
@@ -25,39 +17,71 @@ type ScreenshotCoin = {
   priceChange7dPct: number | null;
 };
 
-function usd(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "-";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: value < 1 ? 6 : 2,
-  }).format(value);
+type Coin = {
+  id: string;
+  symbol: string;
+  name: string;
+  image: string;
+  current_price: number;
+  market_cap_rank: number | null;
+  total_volume: number;
+  price_change_percentage_24h: number | null;
+  price_change_percentage_7d_in_currency?: number | null;
+};
+
+function snapshotDateMDY() {
+  const d = new Date();
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const year = d.getUTCFullYear();
+  return `${month}/${day}/${year}`;
 }
 
-function pct(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "-";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+async function getBaseUrl() {
+  const envBase = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL;
+  if (envBase) return envBase.replace(/\/+$/, "");
+
+  const h = await headers();
+  const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3000";
+  const proto = h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
 }
 
-function compact(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "-";
-  return new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 2,
-  }).format(value);
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ t?: string }>;
+}): Promise<Metadata> {
+  const query = await searchParams;
+  const baseUrl = await getBaseUrl();
+  const stamp = String(query?.t || Date.now());
+  const imageUrl = `${baseUrl}/api/screenshot/build?t=${encodeURIComponent(stamp)}`;
+  const pageUrl = `${baseUrl}/screenshot?t=${encodeURIComponent(stamp)}`;
+
+  return {
+    title: "Trending Coins Screenshot",
+    description: "Trending coins image preview.",
+    openGraph: {
+      title: "Trending Coins Screenshot",
+      description: "Trending coins image preview.",
+      type: "website",
+      url: pageUrl,
+      images: [{ url: imageUrl, width: 540, height: 750, alt: "Trending coins screenshot" }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "Trending Coins Screenshot",
+      description: "Trending coins image preview.",
+      images: [imageUrl],
+    },
+  };
 }
 
-function emojiForTrend(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "•";
-  return value >= 0 ? "▲" : "▼";
-}
-
-const API_KEY =
-  process.env.COINGECKO_API_KEY ||
-  process.env.NEXT_PUBLIC_COINGECKO_API_KEY ||
-  "CG-URjRqWcx2fcJZn4toPV6WGBW";
+const API_KEY = process.env.COINGECKO_API_KEY || process.env.NEXT_PUBLIC_COINGECKO_API_KEY;
 
 async function getTop10FromApi(): Promise<ScreenshotCoin[]> {
+  if (!API_KEY) return [];
+
   const url =
     "https://api.coingecko.com/api/v3/coins/markets" +
     "?vs_currency=usd&per_page=250&page=1&sparkline=false&price_change_percentage=24h,7d";
@@ -142,8 +166,8 @@ export default async function ScreenshotPage({
   searchParams: Promise<{ seed?: string; data?: string }>;
 }) {
   const query = await searchParams;
-  const seed = String(query?.seed || "").trim();
-  const dateLabel = new Date().toLocaleDateString("en-US");
+  const seed = String(query?.seed || "shot").trim();
+  const dateLabel = snapshotDateMDY();
   const top10 = parseCoinDataParam(String(query?.data || "")) || (await getTop10FromApi());
   const rows = top10.length
     ? top10
@@ -165,115 +189,15 @@ export default async function ScreenshotPage({
     <main
       style={{
         margin: 0,
-        padding: 8,
         width: 540,
         height: 750,
         background: "#ffffff",
         overflow: "hidden",
-        fontFamily: "Montserrat, system-ui, -apple-system, sans-serif",
+        fontFamily:
+          '"Noto Sans","Noto Sans CJK SC","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Arial Unicode MS","Segoe UI Symbol",sans-serif',
       }}
     >
-      <style>{`html,body{margin:0!important;padding:0!important;background:#fff!important;}*{box-sizing:border-box;}`}</style>
-
-      <section
-        style={{
-          borderRadius: 14,
-          color: "#fff",
-          padding: 14,
-          background:
-            "radial-gradient(circle at 85% 10%, rgba(255,255,255,0.3), transparent 30%), linear-gradient(135deg,#0f172a,#2563eb)",
-        }}
-      >
-        <p style={{ margin: 0, fontSize: 12, letterSpacing: "0.08em", fontWeight: 700, opacity: 0.9 }}>TRENDING COINS</p>
-        <h1 style={{ margin: "8px 0 0", fontSize: 34, lineHeight: 1, fontWeight: 900 }}>TRENDING COINS LAST 24 HOURS</h1>
-        <p style={{ margin: "8px 0 0", fontSize: 13 }}>Top movers ranked by 24h momentum</p>
-      </section>
-
-      <div style={{ marginTop: -12, padding: "0 8px", display: "flex", justifyContent: "space-between" }}>
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            borderRadius: 999,
-            padding: "6px 10px",
-            fontSize: 11,
-            fontWeight: 700,
-            color: "#fff",
-            background: "#0f172a",
-          }}
-        >
-          Snapshot: {dateLabel}
-        </span>
-      </div>
-
-      <section style={{ marginTop: 8, display: "grid", height: 560, alignContent: "start" }}>
-        {rows.map((coin) => {
-          const isUp = (coin.priceChange24hPct ?? 0) >= 0;
-          return (
-            <article
-              key={`${coin.id}-${seed}`}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "40px 1fr",
-                gap: 9,
-                alignItems: "center",
-                borderBottom: "1px solid #eaf0f8",
-                padding: "6px 2px",
-              }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={coin.image}
-                alt={coin.name}
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  border: "1px solid #e0eaf8",
-                  background: "#fff",
-                }}
-              />
-              <div>
-                <p style={{ margin: 0, fontSize: 16, fontWeight: 700, lineHeight: 1.1, color: "#0f172a" }}>
-                  {coin.name} ({coin.symbol}){" "}
-                  <span style={{ color: isUp ? "#0d8f49" : "#c33f2d", fontWeight: 700 }}>
-                    {emojiForTrend(coin.priceChange24hPct)} {pct(coin.priceChange24hPct)}
-                  </span>
-                </p>
-                <p
-                  style={{
-                    margin: "3px 0 0",
-                    fontSize: 11,
-                    color: "#4d5f7a",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {emojiForTrend(coin.priceChange7dPct)} 7d {pct(coin.priceChange7dPct)} | Price{" "}
-                  <span style={{ fontWeight: 800, color: "#0f172a" }}>{usd(coin.currentPrice)}</span> | Vol {compact(coin.totalVolume)} | Rank #{coin.marketCapRank ?? "-"}
-                </p>
-              </div>
-            </article>
-          );
-        })}
-      </section>
-
-      <footer
-        style={{
-          marginTop: 8,
-          height: 38,
-          borderRadius: 10,
-          background: "#09111f",
-          color: "#fff",
-          display: "grid",
-          placeItems: "center",
-          fontSize: 12,
-          fontWeight: 700,
-        }}
-      >
-        Source: CoinGecko markets API | Size: 540 x 750
-      </footer>
+      <TrendingScreenshotCard coins={rows} snapshotLabel={dateLabel} keyPrefix={seed} />
     </main>
   );
 }
