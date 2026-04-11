@@ -8,6 +8,8 @@ type AutomationConfig = {
   enabled: boolean;
   slots: string[];
   timeZone: string;
+  xConnected?: boolean;
+  xUserName?: string | null;
 };
 
 const CONFIG_DOC_PATH = "automation/config";
@@ -50,7 +52,22 @@ async function readConfig(): Promise<AutomationConfig> {
 export async function GET() {
   try {
     const config = await readConfig();
-    return NextResponse.json(config);
+    const xCredSnap = await adminDb.doc("automation/xCredentials").get();
+    const xData = (xCredSnap.data() || {}) as {
+      xAccessToken?: string;
+      xAccessTokenSecret?: string;
+      xUserName?: string | null;
+    };
+
+    const xConnected =
+      String(xData?.xAccessToken || "").trim().length > 0 &&
+      String(xData?.xAccessTokenSecret || "").trim().length > 0;
+
+    return NextResponse.json({
+      ...config,
+      xConnected,
+      xUserName: xConnected ? String(xData?.xUserName || "").trim() || null : null,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to read automation settings.";
     return NextResponse.json({ error: message }, { status: 500 });

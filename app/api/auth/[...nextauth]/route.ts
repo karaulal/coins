@@ -38,16 +38,20 @@ export const authOptions: AuthOptions = {
 				}
 
 				if (nextToken.xAccessToken && nextToken.xAccessTokenSecret) {
-					await adminDb.doc("automation/xCredentials").set(
-						{
-							provider: "twitter",
-							xAccessToken: nextToken.xAccessToken,
-							xAccessTokenSecret: nextToken.xAccessTokenSecret,
-							xUserName: nextToken.xUserName || null,
-							updatedAt: FieldValue.serverTimestamp(),
-						},
-						{ merge: true }
-					);
+					try {
+						await adminDb.doc("automation/xCredentials").set(
+							{
+								provider: "twitter",
+								xAccessToken: nextToken.xAccessToken,
+								xAccessTokenSecret: nextToken.xAccessTokenSecret,
+								xUserName: nextToken.xUserName || null,
+								updatedAt: FieldValue.serverTimestamp(),
+							},
+							{ merge: true }
+						);
+					} catch (error) {
+						console.error("Failed to persist X credentials", error);
+					}
 				}
 			}
 

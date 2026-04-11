@@ -86,6 +86,8 @@ export default function Home() {
   const [automationLoaded, setAutomationLoaded] = useState(false);
   const [automationSaving, setAutomationSaving] = useState(false);
   const [automationMessage, setAutomationMessage] = useState<string>("");
+  const [xServerConnected, setXServerConnected] = useState(false);
+  const [xServerUserName, setXServerUserName] = useState<string>("");
   const [imageFile, setImageFile] = useState<string>("");
   const [imageRenderUrl, setImageRenderUrl] = useState<string>("");
   const [savedDocId, setSavedDocId] = useState<string>("");
@@ -93,6 +95,7 @@ export default function Home() {
   const top10 = useMemo(() => coins.slice(0, 10), [coins]);
   const isAllowedOperator = authUser?.email?.toLowerCase() === ALLOWED_OPERATOR_EMAIL;
   const isXConnected = xStatus === "authenticated";
+  const isXConnectedAny = isXConnected || xServerConnected;
   const xUserName = String((xSession as { xUserName?: string } | null)?.xUserName || xSession?.user?.name || "").trim();
 
   const nextAutomationRuns = useMemo(() => {
@@ -142,12 +145,16 @@ export default function Home() {
           enabled?: boolean;
           slots?: string[];
           timeZone?: string;
+          xConnected?: boolean;
+          xUserName?: string | null;
           error?: string;
         };
 
         if (!response.ok) throw new Error(String(payload?.error || "Failed to load automation settings."));
 
         setAutomationEnabled(Boolean(payload?.enabled));
+        setXServerConnected(Boolean(payload?.xConnected));
+        setXServerUserName(String(payload?.xUserName || "").trim());
         const slots = Array.isArray(payload?.slots) ? payload.slots : [];
         setAutomationSlots(
           slots.length
@@ -164,7 +171,7 @@ export default function Home() {
     }
 
     void loadAutomationSettings();
-  }, [automationEnabled, automationSlots]);
+  }, []);
 
   const persistAutomationSettings = useCallback(
     async (nextEnabled: boolean, nextSlots: AutomationSlot[]) => {
@@ -471,8 +478,13 @@ export default function Home() {
 
         <div className="x-panel">
           <p>
-            X Account: {isXConnected ? `connected${xUserName ? ` (@${xUserName})` : ""}` : "not connected"}
+            X Account: {isXConnectedAny
+              ? `connected${(xUserName || xServerUserName) ? ` (@${xUserName || xServerUserName})` : ""}`
+              : "not connected"}
           </p>
+          {!isXConnected && xServerConnected ? (
+            <p className="ok-box">Connected on server. Connect in this browser session only if you want manual posting from this page.</p>
+          ) : null}
           {isXConnected ? (
             <button onClick={disconnectX}>Disconnect X</button>
           ) : (
