@@ -11,6 +11,7 @@ import {
 import { signIn as signInX, signOut as signOutX, useSession } from "next-auth/react";
 import { auth, initAnalytics } from "@/lib/firebase";
 import TrendingScreenshotCard from "@/components/TrendingScreenshotCard";
+import { topThreeCoinLines, tweetTextWithTopThree } from "@/lib/social-format";
 
 const ALLOWED_OPERATOR_EMAIL = "karaulal@icloud.com";
 
@@ -83,6 +84,7 @@ export default function Home() {
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [automationSlots, setAutomationSlots] = useState<AutomationSlot[]>(DEFAULT_AUTOMATION_SLOTS);
   const [automationTimeZone, setAutomationTimeZone] = useState("UTC");
+  const [automationRandomizeWindow, setAutomationRandomizeWindow] = useState(false);
   const [automationLoaded, setAutomationLoaded] = useState(false);
   const [automationSaving, setAutomationSaving] = useState(false);
   const [automationMessage, setAutomationMessage] = useState<string>("");
@@ -145,6 +147,7 @@ export default function Home() {
           enabled?: boolean;
           slots?: string[];
           timeZone?: string;
+          randomizeWindow?: boolean;
           xConnected?: boolean;
           xUserName?: string | null;
           error?: string;
@@ -153,6 +156,7 @@ export default function Home() {
         if (!response.ok) throw new Error(String(payload?.error || "Failed to load automation settings."));
 
         setAutomationEnabled(Boolean(payload?.enabled));
+        setAutomationRandomizeWindow(Boolean(payload?.randomizeWindow));
         setXServerConnected(Boolean(payload?.xConnected));
         setXServerUserName(String(payload?.xUserName || "").trim());
         const slots = Array.isArray(payload?.slots) ? payload.slots : [];
@@ -174,7 +178,7 @@ export default function Home() {
   }, []);
 
   const persistAutomationSettings = useCallback(
-    async (nextEnabled: boolean, nextSlots: AutomationSlot[]) => {
+    async (nextEnabled: boolean, nextSlots: AutomationSlot[], nextRandomizeWindow = automationRandomizeWindow) => {
       setAutomationSaving(true);
       setAutomationMessage("");
       try {
@@ -182,6 +186,7 @@ export default function Home() {
           enabled: nextEnabled,
           slots: nextSlots.map((s) => s.time),
           timeZone: automationTimeZone,
+          randomizeWindow: nextRandomizeWindow,
         };
         const response = await fetch("/api/automation/settings", {
           method: "POST",
@@ -199,7 +204,7 @@ export default function Home() {
         setAutomationSaving(false);
       }
     },
-    [automationTimeZone]
+    [automationTimeZone, automationRandomizeWindow]
   );
 
   async function handleSignup() {
@@ -289,6 +294,8 @@ export default function Home() {
       return;
     }
 
+    const tweetText = tweetTextWithTopThree(snapshotDateMDY(), coins);
+
     setPostingToX(true);
     setError(null);
     setXMessage("");
@@ -298,7 +305,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileUrl,
-          text: `Trending coins update • ${snapshotDateMDY()}`,
+          text: tweetText,
         }),
       });
 
@@ -376,12 +383,25 @@ export default function Home() {
   }
 
   const sendWebhookAndX = useCallback(async (fileUrl: string, requireX: boolean) => {
+    const dateLabel = snapshotDateMDY();
+    const topCoinLines = topThreeCoinLines(coins);
+    const tweetText = tweetTextWithTopThree(dateLabel, coins);
+
     const response = await fetch("/api/webhook/send-image", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         fileUrl,
-        date: snapshotDateMDY(),
+        date: dateLabel,
+        topCoinLines,
+        topCoins: coins.slice(0, 3).map((coin, index) => ({
+          rank: index + 1,
+          name: coin.name,
+          symbol: String(coin.symbol || "").toUpperCase(),
+          trend24hPct: coin.priceChange24hPct,
+          price: coin.currentPrice,
+        })),
+        tweetText,
       }),
     });
 
@@ -403,7 +423,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fileUrl,
-          text: `Trending coins update • ${snapshotDateMDY()}`,
+          text: tweetText,
         }),
       });
 
@@ -415,7 +435,7 @@ export default function Home() {
       const tweetId = String(xPayload?.tweetId || "").trim();
       setXMessage(tweetId ? `Posted to X successfully (tweet id: ${tweetId}).` : "Posted to X successfully.");
     }
-  }, [isXConnected]);
+  }, [coins, isXConnected]);
 
   async function fetchTrendingCoins() {
     if (!isAllowedOperator) {
@@ -507,7 +527,7 @@ export default function Home() {
               onClick={() => {
                 const nextSlots = [...automationSlots, { id: slotId(), time: "12:00" }];
                 setAutomationSlots(nextSlots);
-                void persistAutomationSettings(automationEnabled, nextSlots);
+                void persistAutomationSettings(automationEnabled, nextSlots, automationRandomizeWindow);
               }}
               type="button"
               aria-label="Add slot"
@@ -517,6 +537,20 @@ export default function Home() {
             </button>
           </div>
           <p>Daily slots ({automationTimeZone})</p>
+          <label className="slot-row" style={{ justifyContent: "flex-start", gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={automationRandomizeWindow}
+              onChange={(e) => {
+                const nextValue = e.target.checked;
+                setAutomationRandomizeWindow(nextValue);
+                void persistAutomationSettings(automationEnabled, automationSlots, nextValue);
+              }}
+              disabled={!automationReady || automationSaving}
+            />
+            <span>Randomize +/- 90 min</span>
+          </label>
+          {automationRandomizeWindow ? <p>Each slot executes at a deterministic daily offset of +/-45 minutes.</p> : null}
 
           <div className="slot-list">
             {automationSlots.map((slot) => (
@@ -528,7 +562,7 @@ export default function Home() {
                     const nextTime = e.target.value;
                     const nextSlots = automationSlots.map((s) => (s.id === slot.id ? { ...s, time: nextTime } : s));
                     setAutomationSlots(nextSlots);
-                    void persistAutomationSettings(automationEnabled, nextSlots);
+                    void persistAutomationSettings(automationEnabled, nextSlots, automationRandomizeWindow);
                   }}
                   className="slot-time"
                   disabled={!automationReady || automationSaving}
@@ -539,7 +573,7 @@ export default function Home() {
                   onClick={() => {
                     const nextSlots = automationSlots.filter((s) => s.id !== slot.id);
                     setAutomationSlots(nextSlots);
-                    void persistAutomationSettings(automationEnabled, nextSlots);
+                    void persistAutomationSettings(automationEnabled, nextSlots, automationRandomizeWindow);
                   }}
                   disabled={automationSlots.length <= 1 || !automationReady || automationSaving}
                 >
@@ -554,7 +588,7 @@ export default function Home() {
             onClick={() => {
               const nextEnabled = !automationEnabled;
               setAutomationEnabled(nextEnabled);
-              void persistAutomationSettings(nextEnabled, automationSlots);
+              void persistAutomationSettings(nextEnabled, automationSlots, automationRandomizeWindow);
             }}
             disabled={!automationReady || automationSaving}
           >

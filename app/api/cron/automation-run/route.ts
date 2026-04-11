@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { TwitterApi } from "twitter-api-v2";
+import { topThreeCoinLines, tweetTextWithTopThree } from "@/lib/social-format";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +22,16 @@ type TrendingCoin = {
   priceChange7dPct: number | null;
   lastUpdated: string | null;
 };
+
+type SlotDecision = {
+  slot: string;
+  targetTime: string;
+  offsetMinutes: number;
+  deltaMinutes: number;
+};
+
+const RANDOMIZE_HALF_WINDOW_MINUTES = 45;
+const DUE_TOLERANCE_MINUTES = 2;
 
 function toMDYFromDateKey(dateKey: string): string {
   const [y, m, d] = dateKey.split("-");
@@ -49,6 +60,47 @@ function nowInTimeZone(timeZone: string) {
   return {
     dateKey: `${year}-${month}-${day}`,
     timeKey: `${hour}:${minute}`,
+  };
+}
+
+function hhmmToMinutes(value: string): number {
+  const [h, m] = value.split(":");
+  const hh = Number(h);
+  const mm = Number(m);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return -1;
+  return hh * 60 + mm;
+}
+
+function minutesToHHMM(total: number): string {
+  const normalized = ((total % 1440) + 1440) % 1440;
+  const hh = Math.floor(normalized / 60);
+  const mm = normalized % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+function dailyOffset(dateKey: string, slot: string): number {
+  const seed = `${dateKey}:${slot}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  const span = RANDOMIZE_HALF_WINDOW_MINUTES * 2 + 1;
+  return (hash % span) - RANDOMIZE_HALF_WINDOW_MINUTES;
+}
+
+function buildSlotDecision(nowTimeKey: string, dateKey: string, slot: string, randomizeWindow: boolean): SlotDecision {
+  const slotMinutes = hhmmToMinutes(slot);
+  const nowMinutes = hhmmToMinutes(nowTimeKey);
+  const offsetMinutes = randomizeWindow ? dailyOffset(dateKey, slot) : 0;
+  const targetMinutes = slotMinutes + offsetMinutes;
+  const targetTime = minutesToHHMM(targetMinutes);
+  const deltaMinutes = nowMinutes - hhmmToMinutes(targetTime);
+
+  return {
+    slot,
+    targetTime,
+    offsetMinutes,
+    deltaMinutes,
   };
 }
 
@@ -96,6 +148,8 @@ async function runWorkflow(baseUrl: string, dateLabel: string) {
 
   const coins = Array.isArray(trendingPayload?.coins) ? trendingPayload.coins.slice(0, 10) : [];
   if (!coins.length) throw new Error("No trending coins to process.");
+  const topCoinLines = topThreeCoinLines(coins);
+  const tweetText = tweetTextWithTopThree(dateLabel, coins);
 
   const createRes = await fetch(`${baseUrl}/api/screenshot/create`, {
     method: "POST",
@@ -129,14 +183,26 @@ async function runWorkflow(baseUrl: string, dateLabel: string) {
   const webhookRes = await fetch(`${baseUrl}/api/webhook/send-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileUrl: imageUrl, date: dateLabel }),
+    body: JSON.stringify({
+      fileUrl: imageUrl,
+      date: dateLabel,
+      topCoinLines,
+      topCoins: coins.slice(0, 3).map((coin, index) => ({
+        rank: index + 1,
+        name: coin.name,
+        symbol: String(coin.symbol || "").toUpperCase(),
+        trend24hPct: coin.priceChange24hPct,
+        price: coin.currentPrice,
+      })),
+      tweetText,
+    }),
   });
   const webhookPayload = (await webhookRes.json().catch(() => ({}))) as { error?: string };
   if (!webhookRes.ok) {
     throw new Error(String(webhookPayload?.error || "Webhook send failed."));
   }
 
-  const tweetId = await postToX(imageUrl, `Trending coins update • ${dateLabel}`);
+  const tweetId = await postToX(imageUrl, tweetText);
 
   return {
     imageUrl,
@@ -165,6 +231,7 @@ export async function GET(req: Request) {
       enabled?: boolean;
       slots?: string[];
       timeZone?: string;
+      randomizeWindow?: boolean;
     };
 
     const enabled = Boolean(config?.enabled);
@@ -172,16 +239,25 @@ export async function GET(req: Request) {
       ? config.slots.filter((s) => /^\d{2}:\d{2}$/.test(String(s || "")))
       : [];
     const timeZone = String(config?.timeZone || "UTC");
+    const randomizeWindow = Boolean(config?.randomizeWindow);
 
     if (!enabled || !slots.length) {
       return NextResponse.json({ ok: true, skipped: true, reason: "Automation disabled or no slots." });
     }
 
     const now = nowInTimeZone(timeZone);
-    const dueSlots = slots.filter((slot) => slot === now.timeKey);
+    const decisions = slots.map((slot) => buildSlotDecision(now.timeKey, now.dateKey, slot, randomizeWindow));
+    const dueSlots = decisions.filter((d) => Math.abs(d.deltaMinutes) <= DUE_TOLERANCE_MINUTES);
 
     if (!dueSlots.length) {
-      return NextResponse.json({ ok: true, skipped: true, reason: "No slot due at this minute.", now });
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "No slot due at this minute.",
+        now,
+        randomizeWindow,
+        dueToleranceMinutes: DUE_TOLERANCE_MINUTES,
+      });
     }
 
     const baseUrl =
@@ -190,21 +266,33 @@ export async function GET(req: Request) {
 
     const results: Array<Record<string, unknown>> = [];
 
-    for (const slot of dueSlots) {
-      const runId = `${now.dateKey}-${slot.replace(":", "")}`;
+    for (const due of dueSlots) {
+      const runId = `${now.dateKey}-${due.slot.replace(":", "")}`;
       const runRef = adminDb.collection("automation_runs").doc(runId);
       const runDoc = await runRef.get();
       if (runDoc.exists) {
-        results.push({ slot, runId, skipped: true, reason: "Already executed for this slot/day." });
-        continue;
+        const previous = runDoc.data() as { status?: string };
+        const status = String(previous?.status || "");
+        if (status === "success" || status === "running") {
+          results.push({
+            slot: due.slot,
+            runId,
+            skipped: true,
+            reason: status === "success" ? "Already executed successfully for this slot/day." : "Run is currently in progress.",
+          });
+          continue;
+        }
       }
 
       await runRef.set({
-        slot,
+        slot: due.slot,
+        effectiveTime: due.targetTime,
+        offsetMinutes: due.offsetMinutes,
         dateKey: now.dateKey,
         timeZone,
         status: "running",
         createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
 
       try {
@@ -213,29 +301,33 @@ export async function GET(req: Request) {
           {
             status: "success",
             completedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
             result: workflow,
           },
           { merge: true }
         );
-        results.push({ slot, runId, ok: true, ...workflow });
+        results.push({ slot: due.slot, effectiveTime: due.targetTime, offsetMinutes: due.offsetMinutes, runId, ok: true, ...workflow });
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Automation run failed.";
         await runRef.set(
           {
             status: "failed",
             completedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
             error: message,
           },
           { merge: true }
         );
-        results.push({ slot, runId, ok: false, error: message });
+        results.push({ slot: due.slot, effectiveTime: due.targetTime, offsetMinutes: due.offsetMinutes, runId, ok: false, error: message });
       }
     }
 
     return NextResponse.json({
       ok: true,
       now,
-      dueSlots,
+      dueSlots: dueSlots.map((d) => ({ slot: d.slot, effectiveTime: d.targetTime, offsetMinutes: d.offsetMinutes })),
+      randomizeWindow,
+      dueToleranceMinutes: DUE_TOLERANCE_MINUTES,
       results,
       durationMs: Date.now() - startedAt,
     });

@@ -26,7 +26,7 @@ function timeSheets12h(d: Date) {
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as { fileUrl?: string; date?: string };
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const fileUrl = String(body?.fileUrl || "").trim();
     const date = String(body?.date || currentDateMDY()).trim();
     const plus5 = currentPlus5Minutes();
@@ -39,7 +39,14 @@ export async function POST(req: Request) {
     const webhookRes = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ date, fileUrl, time }),
+      body: JSON.stringify({
+        date,
+        fileUrl,
+        time,
+        topCoinLines: Array.isArray(body?.topCoinLines) ? body.topCoinLines : [],
+        topCoins: Array.isArray(body?.topCoins) ? body.topCoins : [],
+        tweetText: typeof body?.tweetText === "string" ? body.tweetText : "",
+      }),
     });
 
     if (!webhookRes.ok) {

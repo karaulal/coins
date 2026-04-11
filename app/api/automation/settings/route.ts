@@ -8,6 +8,7 @@ type AutomationConfig = {
   enabled: boolean;
   slots: string[];
   timeZone: string;
+  randomizeWindow: boolean;
   xConnected?: boolean;
   xUserName?: string | null;
 };
@@ -38,7 +39,7 @@ function normalizeTimeZone(value: unknown): string {
 async function readConfig(): Promise<AutomationConfig> {
   const snap = await adminDb.doc(CONFIG_DOC_PATH).get();
   if (!snap.exists) {
-    return { enabled: false, slots: ["08:00", "17:00"], timeZone: "UTC" };
+    return { enabled: false, slots: ["08:00", "17:00"], timeZone: "UTC", randomizeWindow: false };
   }
 
   const data = snap.data() as Record<string, unknown>;
@@ -46,6 +47,7 @@ async function readConfig(): Promise<AutomationConfig> {
     enabled: Boolean(data?.enabled),
     slots: normalizeSlots(data?.slots),
     timeZone: normalizeTimeZone(data?.timeZone),
+    randomizeWindow: Boolean(data?.randomizeWindow),
   };
 }
 
@@ -82,6 +84,7 @@ export async function POST(req: Request) {
       enabled: Boolean(body?.enabled),
       slots: normalizeSlots(body?.slots),
       timeZone: normalizeTimeZone(body?.timeZone),
+      randomizeWindow: Boolean(body?.randomizeWindow),
     };
 
     await adminDb.doc(CONFIG_DOC_PATH).set(
@@ -89,6 +92,7 @@ export async function POST(req: Request) {
         enabled: config.enabled,
         slots: config.slots,
         timeZone: config.timeZone,
+        randomizeWindow: config.randomizeWindow,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
