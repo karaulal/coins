@@ -1,8 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { initAnalytics } from "@/lib/firebase";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  type User,
+} from "firebase/auth";
+import { signIn as signInX, signOut as signOutX, useSession } from "next-auth/react";
+import { auth, initAnalytics } from "@/lib/firebase";
 import TrendingScreenshotCard from "@/components/TrendingScreenshotCard";
+
+const ALLOWED_OPERATOR_EMAIL = "karaulal@icloud.com";
 
 function snapshotDateMDY() {
   const d = new Date();
@@ -30,6 +40,17 @@ type Coin = {
   lastUpdated: string | null;
 };
 
+type AutomationSlot = {
+  id: string;
+  time: string;
+};
+
+const AUTOMATION_STORAGE_KEY = "coins-admin-automation-v1";
+const DEFAULT_AUTOMATION_SLOTS: AutomationSlot[] = [
+  { id: "slot-0800", time: "08:00" },
+  { id: "slot-1700", time: "17:00" },
+];
+
 function usd(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value < 1 ? 6 : 2 }).format(value);
@@ -46,19 +67,336 @@ function compact(value: number | null | undefined) {
 }
 
 export default function Home() {
+  const { data: xSession, status: xStatus } = useSession();
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState<string>("");
   const [coins, setCoins] = useState<Coin[]>([]);
   const [loading, setLoading] = useState(false);
   const [sendingImage, setSendingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [webhookMessage, setWebhookMessage] = useState<string>("");
+  const [xMessage, setXMessage] = useState<string>("");
+  const [postingToX, setPostingToX] = useState(false);
+  const [automationEnabled, setAutomationEnabled] = useState(false);
+  const [automationSlots, setAutomationSlots] = useState<AutomationSlot[]>(DEFAULT_AUTOMATION_SLOTS);
+  const [automationBusy, setAutomationBusy] = useState(false);
+  const [automationMessage, setAutomationMessage] = useState<string>("");
   const [imageFile, setImageFile] = useState<string>("");
   const [imageRenderUrl, setImageRenderUrl] = useState<string>("");
   const [savedDocId, setSavedDocId] = useState<string>("");
   const [savedAt, setSavedAt] = useState<string>("");
+  const automationRunKeyRef = useRef<Set<string>>(new Set());
 
   const top10 = useMemo(() => coins.slice(0, 10), [coins]);
+  const isAllowedOperator = authUser?.email?.toLowerCase() === ALLOWED_OPERATOR_EMAIL;
+  const isXConnected = xStatus === "authenticated";
+  const xUserName = String((xSession as { xUserName?: string } | null)?.xUserName || xSession?.user?.name || "").trim();
+
+  const nextAutomationRuns = useMemo(() => {
+    if (!automationEnabled || !automationSlots.length) return [] as Date[];
+
+    const now = new Date();
+    const runs: Date[] = [];
+
+    for (let dayOffset = 0; dayOffset < 14; dayOffset += 1) {
+      for (const slot of automationSlots) {
+        const [h, m] = slot.time.split(":");
+        const hh = Number(h);
+        const mm = Number(m);
+        if (!Number.isFinite(hh) || !Number.isFinite(mm)) continue;
+
+        const d = new Date(now);
+        d.setDate(now.getDate() + dayOffset);
+        d.setHours(hh, mm, 0, 0);
+        if (d > now) runs.push(d);
+      }
+    }
+
+    return runs.sort((a, b) => a.getTime() - b.getTime()).slice(0, 8);
+  }, [automationEnabled, automationSlots]);
+
+  function slotId() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return `slot-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      setAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(AUTOMATION_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        enabled?: boolean;
+        slots?: Array<{ id?: string; time?: string }>;
+      };
+
+      if (typeof parsed.enabled === "boolean") {
+        setAutomationEnabled(parsed.enabled);
+      }
+
+      if (Array.isArray(parsed.slots)) {
+        const normalized = parsed.slots
+          .map((s) => ({
+            id: String(s?.id || slotId()),
+            time: String(s?.time || "").slice(0, 5),
+          }))
+          .filter((s) => /^\d{2}:\d{2}$/.test(s.time));
+
+        if (normalized.length) {
+          setAutomationSlots(normalized);
+        }
+      }
+    } catch {
+      // Ignore invalid local storage payload.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        AUTOMATION_STORAGE_KEY,
+        JSON.stringify({ enabled: automationEnabled, slots: automationSlots })
+      );
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [automationEnabled, automationSlots]);
+
+  async function handleSignup() {
+    if (!email.trim() || !password) {
+      setError("Enter both email and password.");
+      return;
+    }
+
+    setAuthBusy(true);
+    setError(null);
+    setAuthMessage("");
+    try {
+      await createUserWithEmailAndPassword(auth, email.trim(), password);
+      setAuthMessage("Account created and logged in.");
+      setPassword("");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Signup failed.";
+      setError(message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleLogin() {
+    if (!email.trim() || !password) {
+      setError("Enter both email and password.");
+      return;
+    }
+
+    setAuthBusy(true);
+    setError(null);
+    setAuthMessage("");
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      setAuthMessage("Logged in successfully.");
+      setPassword("");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Login failed.";
+      setError(message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleLogout() {
+    setAuthBusy(true);
+    setError(null);
+    setAuthMessage("");
+    try {
+      await firebaseSignOut(auth);
+      setAuthMessage("Logged out.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Logout failed.";
+      setError(message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function connectX() {
+    setError(null);
+    setXMessage("");
+    await signInX("twitter");
+  }
+
+  async function disconnectX() {
+    setError(null);
+    setXMessage("");
+    await signOutX({ redirect: false });
+    setXMessage("Disconnected X account.");
+  }
+
+  async function postImageToX() {
+    if (!isAllowedOperator) {
+      setError("Forbidden");
+      return;
+    }
+
+    if (!isXConnected) {
+      setError("Connect your X account first.");
+      return;
+    }
+
+    const fileUrl = imageFile || imageRenderUrl;
+    if (!fileUrl) {
+      setError("Generate an image first, then post to X.");
+      return;
+    }
+
+    setPostingToX(true);
+    setError(null);
+    setXMessage("");
+    try {
+      const response = await fetch("/api/x/post-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileUrl,
+          text: `Trending coins update • ${snapshotDateMDY()}`,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(String(payload?.error || "Failed to post on X."));
+      }
+
+      const tweetId = String(payload?.tweetId || "").trim();
+      setXMessage(tweetId ? `Posted to X successfully (tweet id: ${tweetId}).` : "Posted to X successfully.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to post on X.";
+      setError(message);
+    } finally {
+      setPostingToX(false);
+    }
+  }
+
+  async function generateAndPersistTrendingImage() {
+    await initAnalytics();
+
+    const response = await fetch("/api/trending", { method: "GET" });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(String(data?.error || "Unable to fetch trending coins."));
+    }
+
+    const nextCoins: Coin[] = Array.isArray(data?.coins) ? data.coins : [];
+    setCoins(nextCoins);
+
+    if (!nextCoins.length) {
+      throw new Error("No trending coins returned.");
+    }
+
+    const createResponse = await fetch("/api/screenshot/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coins: nextCoins.slice(0, 10) }),
+    });
+
+    const createPayload = await createResponse.json().catch(() => ({}));
+    if (!createResponse.ok) {
+      throw new Error(String(createPayload?.error || "Screenshot service failed."));
+    }
+
+    const publicImageUrl = String(createPayload?.imageUrl || "").trim();
+    if (!publicImageUrl) {
+      throw new Error("Screenshot was generated but no public image URL was returned.");
+    }
+
+    setImageRenderUrl(publicImageUrl);
+    setImageFile(publicImageUrl);
+
+    const persistResponse = await fetch("/api/dailytrend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fetchedAt: snapshotDateMDY(),
+        imageUrl: publicImageUrl,
+        imageFile: publicImageUrl,
+        source: "coingecko/coins/markets+storage",
+        coins: nextCoins,
+      }),
+    });
+
+    const persistPayload = await persistResponse.json().catch(() => ({}));
+    if (!persistResponse.ok) {
+      throw new Error(String(persistPayload?.error || "Failed to save daily trend entry."));
+    }
+
+    setSavedDocId(String(persistPayload?.id || ""));
+    setSavedAt(new Date().toLocaleString());
+    return publicImageUrl;
+  }
+
+  const sendWebhookAndX = useCallback(async (fileUrl: string, requireX: boolean) => {
+    const response = await fetch("/api/webhook/send-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileUrl,
+        date: snapshotDateMDY(),
+      }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(String(payload?.error || "Failed to send image to webhook."));
+    }
+
+    const status = payload?.status ? ` (HTTP ${payload.status})` : "";
+    setWebhookMessage(`Webhook sent successfully${status}.`);
+
+    if (requireX && !isXConnected) {
+      throw new Error("X account must be connected for automation runs.");
+    }
+
+    if (isXConnected) {
+      const xResponse = await fetch("/api/x/post-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileUrl,
+          text: `Trending coins update • ${snapshotDateMDY()}`,
+        }),
+      });
+
+      const xPayload = await xResponse.json().catch(() => ({}));
+      if (!xResponse.ok) {
+        throw new Error(`Webhook sent, but X post failed: ${String(xPayload?.error || "Unknown X error")}`);
+      }
+
+      const tweetId = String(xPayload?.tweetId || "").trim();
+      setXMessage(tweetId ? `Posted to X successfully (tweet id: ${tweetId}).` : "Posted to X successfully.");
+    }
+  }, [isXConnected]);
 
   async function fetchTrendingCoins() {
+    if (!isAllowedOperator) {
+      setError("Forbidden");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSavedDocId("");
@@ -68,60 +406,7 @@ export default function Home() {
     setWebhookMessage("");
 
     try {
-      await initAnalytics();
-
-      const response = await fetch("/api/trending", { method: "GET" });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(String(data?.error || "Unable to fetch trending coins."));
-      }
-
-      const nextCoins: Coin[] = Array.isArray(data?.coins) ? data.coins : [];
-      setCoins(nextCoins);
-
-      if (!nextCoins.length) {
-        return;
-      }
-
-      const createResponse = await fetch("/api/screenshot/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ coins: nextCoins.slice(0, 10) }),
-      });
-
-      const createPayload = await createResponse.json().catch(() => ({}));
-      if (!createResponse.ok) {
-        throw new Error(String(createPayload?.error || "Screenshot service failed."));
-      }
-
-      const publicImageUrl = String(createPayload?.imageUrl || "").trim();
-      if (!publicImageUrl) {
-        throw new Error("Screenshot was generated but no public image URL was returned.");
-      }
-
-      setImageRenderUrl(publicImageUrl);
-      setImageFile(publicImageUrl);
-
-      const persistResponse = await fetch("/api/dailytrend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fetchedAt: snapshotDateMDY(),
-          imageUrl: publicImageUrl,
-          imageFile: publicImageUrl,
-          source: "coingecko/coins/markets+storage",
-          coins: nextCoins,
-        }),
-      });
-
-      const persistPayload = await persistResponse.json().catch(() => ({}));
-      if (!persistResponse.ok) {
-        throw new Error(String(persistPayload?.error || "Failed to save daily trend entry."));
-      }
-
-      setSavedDocId(String(persistPayload?.id || ""));
-      setSavedAt(new Date().toLocaleString());
+      await generateAndPersistTrendingImage();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong.";
       setError(message);
@@ -131,6 +416,11 @@ export default function Home() {
   }
 
   async function sendImageToWebhook() {
+    if (!isAllowedOperator) {
+      setError("Forbidden");
+      return;
+    }
+
     const fileUrl = imageFile || imageRenderUrl;
     if (!fileUrl) {
       setError("Generate an image first, then click Send image.");
@@ -140,24 +430,10 @@ export default function Home() {
     setSendingImage(true);
     setError(null);
     setWebhookMessage("");
+    setXMessage("");
 
     try {
-      const response = await fetch("/api/webhook/send-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileUrl,
-          date: snapshotDateMDY(),
-        }),
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(String(payload?.error || "Failed to send image to webhook."));
-      }
-
-      const status = payload?.status ? ` (HTTP ${payload.status})` : "";
-      setWebhookMessage(`Webhook sent successfully${status}.`);
+      await sendWebhookAndX(fileUrl, false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to send image to webhook.";
       setError(message);
@@ -166,50 +442,242 @@ export default function Home() {
     }
   }
 
+  const runAutomationSlot = useCallback(async (slot: AutomationSlot) => {
+    if (!isAllowedOperator || !authUser) {
+      setAutomationMessage("Automation skipped: operator login is required.");
+      return;
+    }
+
+    if (!isXConnected) {
+      setAutomationMessage("Automation skipped: connect X account first.");
+      return;
+    }
+
+    if (automationBusy) return;
+
+    setAutomationBusy(true);
+    setError(null);
+    setWebhookMessage("");
+    setXMessage("");
+    setAutomationMessage(`Running automation slot ${slot.time}...`);
+
+    try {
+      const fileUrl = await generateAndPersistTrendingImage();
+      await sendWebhookAndX(fileUrl, true);
+      setAutomationMessage(`Automation completed for slot ${slot.time} at ${new Date().toLocaleTimeString()}.`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Automation run failed.";
+      setAutomationMessage(`Automation failed for ${slot.time}: ${message}`);
+      setError(message);
+    } finally {
+      setAutomationBusy(false);
+    }
+  }, [authUser, automationBusy, isAllowedOperator, isXConnected, sendWebhookAndX]);
+
+  useEffect(() => {
+    if (!automationEnabled || !automationSlots.length) return;
+
+    const tick = () => {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const currentMinute = `${hh}:${mm}`;
+      const dayKey = now.toISOString().slice(0, 10);
+
+      for (const slot of automationSlots) {
+        if (slot.time !== currentMinute) continue;
+        const runKey = `${slot.id}:${dayKey}:${slot.time}`;
+        if (automationRunKeyRef.current.has(runKey)) continue;
+
+        automationRunKeyRef.current.add(runKey);
+        void runAutomationSlot(slot);
+      }
+
+      if (automationRunKeyRef.current.size > 400) {
+        automationRunKeyRef.current.clear();
+      }
+    };
+
+    const intervalId = window.setInterval(tick, 15000);
+    tick();
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [automationEnabled, automationSlots, runAutomationSlot]);
+
   return (
     <main className="page-wrap">
       <section className="control-panel">
         <h1>Coins Admin</h1>
         <p>Fetch and store top 20 trending coins by 24h percentage change.</p>
 
-        <button onClick={fetchTrendingCoins} disabled={loading}>
-          {loading ? "Fetching..." : "Fetch Trending Coins"}
-        </button>
-        <button onClick={sendImageToWebhook} disabled={sendingImage || (!imageFile && !imageRenderUrl)}>
-          {sendingImage ? "Sending..." : "Send image"}
-        </button>
+        <div className="x-panel">
+          <p>
+            X Account: {isXConnected ? `connected${xUserName ? ` (@${xUserName})` : ""}` : "not connected"}
+          </p>
+          {isXConnected ? (
+            <button onClick={disconnectX}>Disconnect X</button>
+          ) : (
+            <button onClick={connectX}>Connect to X</button>
+          )}
+          <button
+            onClick={postImageToX}
+            disabled={postingToX || !isXConnected || (!imageFile && !imageRenderUrl) || !isAllowedOperator}
+          >
+            {postingToX ? "Posting..." : "Post image to X"}
+          </button>
+          {!isAllowedOperator ? <p className="error-box">Forbidden</p> : null}
+        </div>
+
+        <div className="automation-panel">
+          <div className="automation-head">
+            <h3>Automation</h3>
+            <button
+              className="slot-add"
+              onClick={() => setAutomationSlots((prev) => [...prev, { id: slotId(), time: "12:00" }])}
+              type="button"
+              aria-label="Add slot"
+            >
+              +
+            </button>
+          </div>
+          <p>Daily slots (local time)</p>
+
+          <div className="slot-list">
+            {automationSlots.map((slot) => (
+              <div key={slot.id} className="slot-row">
+                <input
+                  type="time"
+                  value={slot.time}
+                  onChange={(e) => {
+                    const nextTime = e.target.value;
+                    setAutomationSlots((prev) => prev.map((s) => (s.id === slot.id ? { ...s, time: nextTime } : s)));
+                  }}
+                  className="slot-time"
+                />
+                <button
+                  type="button"
+                  className="slot-delete"
+                  onClick={() => setAutomationSlots((prev) => prev.filter((s) => s.id !== slot.id))}
+                  disabled={automationSlots.length <= 1}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setAutomationEnabled((v) => !v)}
+            disabled={!isAllowedOperator || !authUser}
+          >
+            {automationEnabled ? "Turn Off Automation" : "Turn On Automation"}
+          </button>
+
+          {automationEnabled ? (
+            <div className="next-runs">
+              <strong>Next scheduled workflow runs</strong>
+              {nextAutomationRuns.length ? (
+                <ul>
+                  {nextAutomationRuns.map((runAt, index) => (
+                    <li key={`${runAt.toISOString()}-${index}`}>{runAt.toLocaleString()}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No upcoming runs.</p>
+              )}
+            </div>
+          ) : null}
+          {!isAllowedOperator ? <p className="error-box">Forbidden</p> : null}
+          {automationMessage ? <p className="ok-box">{automationMessage}</p> : null}
+        </div>
+
+        <div className="auth-panel">
+          {authLoading ? (
+            <p>Checking authentication...</p>
+          ) : authUser ? (
+            <>
+              <p className="ok-box">Logged in as {authUser.email || "user"}.</p>
+              <button onClick={handleLogout} disabled={authBusy}>
+                {authBusy ? "Please wait..." : "Log out"}
+              </button>
+            </>
+          ) : (
+            <>
+              <p>Not logged in.</p>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email"
+                className="auth-input"
+                autoComplete="email"
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="auth-input"
+                autoComplete="current-password"
+              />
+              <button onClick={handleLogin} disabled={authBusy || authLoading}>
+                {authBusy ? "Please wait..." : "Log in"}
+              </button>
+              <button onClick={handleSignup} disabled={authBusy || authLoading}>
+                {authBusy ? "Please wait..." : "Sign up"}
+              </button>
+            </>
+          )}
+        </div>
+
+        {authUser ? (
+          <>
+            <button onClick={fetchTrendingCoins} disabled={loading || !isAllowedOperator}>
+              {loading ? "Fetching..." : "Fetch Trending Coins"}
+            </button>
+            <button onClick={sendImageToWebhook} disabled={sendingImage || (!imageFile && !imageRenderUrl) || !isAllowedOperator}>
+              {sendingImage ? "Sending..." : "Send image"}
+            </button>
+            {!isAllowedOperator ? <p className="error-box">Forbidden</p> : null}
+
+            <div className="link-grid">
+              <div>
+                <strong>imageUrl:</strong>{" "}
+                {imageRenderUrl ? (
+                  <a href={imageRenderUrl} target="_blank" rel="noreferrer">
+                    {imageRenderUrl}
+                  </a>
+                ) : (
+                  <span>-</span>
+                )}
+              </div>
+              <div>
+                <strong>imageFile:</strong>{" "}
+                {imageFile ? (
+                  <a href={imageFile} target="_blank" rel="noreferrer">
+                    {imageFile}
+                  </a>
+                ) : (
+                  <span>-</span>
+                )}
+              </div>
+            </div>
+
+            <div className="preview-box">
+              <h2>Generated Preview</h2>
+              {imageFile ? <img src={imageFile} alt="Generated trending coins preview" /> : <p>No image generated yet.</p>}
+            </div>
+          </>
+        ) : null}
 
         {error ? <p className="error-box">{error}</p> : null}
         {savedDocId ? <p className="ok-box">Saved in dailytrend, entry id: {savedDocId} ({savedAt})</p> : null}
+        {authMessage ? <p className="ok-box">{authMessage}</p> : null}
+        {xMessage ? <p className="ok-box">{xMessage}</p> : null}
         {webhookMessage ? <p className="ok-box">{webhookMessage}</p> : null}
-
-        <div className="link-grid">
-          <div>
-            <strong>imageUrl:</strong>{" "}
-            {imageRenderUrl ? (
-              <a href={imageRenderUrl} target="_blank" rel="noreferrer">
-                {imageRenderUrl}
-              </a>
-            ) : (
-              <span>-</span>
-            )}
-          </div>
-          <div>
-            <strong>imageFile:</strong>{" "}
-            {imageFile ? (
-              <a href={imageFile} target="_blank" rel="noreferrer">
-                {imageFile}
-              </a>
-            ) : (
-              <span>-</span>
-            )}
-          </div>
-        </div>
-
-        <div className="preview-box">
-          <h2>Generated Preview</h2>
-          {imageFile ? <img src={imageFile} alt="Generated trending coins preview" /> : <p>No image generated yet.</p>}
-        </div>
       </section>
 
       <section className="results-panel">

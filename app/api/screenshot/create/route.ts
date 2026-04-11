@@ -51,7 +51,7 @@ async function getImageFromScreenshotService(
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), 90_000);
   const width = Math.max(540, Math.trunc(Number(options?.width || 540)));
-  const height = Math.max(750, Math.trunc(Number(options?.height || 750)));
+  const height = Math.max(730, Math.trunc(Number(options?.height || 730)));
   const delayMs = Math.max(0, Math.trunc(Number(options?.delayMs ?? 2000)));
 
   let response: Response;
@@ -152,7 +152,7 @@ export async function POST(req: Request) {
 
     const { bytes, contentType } = await getImageFromScreenshotService(renderUrl, {
       width: 540,
-      height: 750,
+      height: 730,
       delayMs: 2000,
     });
 

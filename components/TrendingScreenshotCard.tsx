@@ -57,16 +57,16 @@ function norm(value: number, min: number, max: number) {
 
 function colorForHeat(index: number) {
   const palette = [
-    "#ff4d4d",
-    "#ff7a45",
-    "#ffa940",
-    "#73d13d",
-    "#36cfc9",
-    "#40a9ff",
-    "#597ef7",
-    "#9254de",
-    "#f759ab",
-    "#13c2c2",
+    "#ef4444",
+    "#f97316",
+    "#fb7185",
+    "#f43f5e",
+    "#60a5fa",
+    "#3b82f6",
+    "#6366f1",
+    "#8b5cf6",
+    "#a855f7",
+    "#ec4899",
   ];
   return palette[index % palette.length];
 }
@@ -406,10 +406,20 @@ export default function TrendingScreenshotCard({
       )}
 
       {variant === "heatmap" && (
-        <section className="shot-heatmap">
-          {buildHeatTreemap(topTen).map((tile) => {
-            const areaShare = tile.share;
-            const isSmall = areaShare < 0.08;
+        (() => {
+          const heatTiles = buildHeatTreemap(topTen);
+          const smallestTileIds = new Set(
+            heatTiles
+              .slice()
+              .sort((a, b) => a.share - b.share)
+              .slice(0, Math.min(6, heatTiles.length))
+              .map((tile) => tile.coin.id)
+          );
+
+          return (
+            <section className="shot-heatmap">
+              {heatTiles.map((tile) => {
+                const isSmall = smallestTileIds.has(tile.coin.id);
             return (
               <article
                 key={`${keyPrefix || "shot"}-heat-${tile.coin.id}`}
@@ -423,7 +433,7 @@ export default function TrendingScreenshotCard({
                 }}
               >
                 <div className="shot-heat-head">
-                  <img src={tile.coin.image} alt={tile.coin.name} className="shot-heat-logo" />
+                  {!isSmall && <img src={tile.coin.image} alt={tile.coin.name} className="shot-heat-logo" />}
                   <p className="shot-heat-title">{tile.coin.symbol}</p>
                 </div>
                 <p className="shot-heat-trend">{pct(tile.coin.priceChange24hPct)}</p>
@@ -435,8 +445,10 @@ export default function TrendingScreenshotCard({
                 {!isSmall && <p className="shot-heat-meta">Vol {compact(tile.coin.totalVolume)}</p>}
               </article>
             );
-          })}
-        </section>
+              })}
+            </section>
+          );
+        })()
       )}
 
       {variant === "bubbles" && (

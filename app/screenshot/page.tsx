@@ -85,7 +85,7 @@ export async function generateMetadata({
       description: "Trending coins image preview.",
       type: "website",
       url: pageUrl,
-      images: [{ url: imageUrl, width: 540, height: 750, alt: "Trending coins screenshot" }],
+      images: [{ url: imageUrl, width: 540, height: 730, alt: "Trending coins screenshot" }],
     },
     twitter: {
       card: "summary_large_image",
@@ -210,7 +210,7 @@ export default async function ScreenshotPage({
       style={{
         margin: 0,
         width: 540,
-        height: 750,
+        height: 730,
         background: "#ffffff",
         overflow: "hidden",
         fontFamily:
