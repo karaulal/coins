@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/automation-run",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/cleanup-images",
       "schedule": "0 3 * * *"
     }

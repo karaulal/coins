@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -45,7 +45,6 @@ type AutomationSlot = {
   time: string;
 };
 
-const AUTOMATION_STORAGE_KEY = "coins-admin-automation-v1";
 const DEFAULT_AUTOMATION_SLOTS: AutomationSlot[] = [
   { id: "slot-0800", time: "08:00" },
   { id: "slot-1700", time: "17:00" },
@@ -83,14 +82,14 @@ export default function Home() {
   const [postingToX, setPostingToX] = useState(false);
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [automationSlots, setAutomationSlots] = useState<AutomationSlot[]>(DEFAULT_AUTOMATION_SLOTS);
-  const [automationBusy, setAutomationBusy] = useState(false);
+  const [automationTimeZone, setAutomationTimeZone] = useState("UTC");
+  const [automationLoaded, setAutomationLoaded] = useState(false);
+  const [automationSaving, setAutomationSaving] = useState(false);
   const [automationMessage, setAutomationMessage] = useState<string>("");
   const [imageFile, setImageFile] = useState<string>("");
   const [imageRenderUrl, setImageRenderUrl] = useState<string>("");
   const [savedDocId, setSavedDocId] = useState<string>("");
   const [savedAt, setSavedAt] = useState<string>("");
-  const automationRunKeyRef = useRef<Set<string>>(new Set());
-
   const top10 = useMemo(() => coins.slice(0, 10), [coins]);
   const isAllowedOperator = authUser?.email?.toLowerCase() === ALLOWED_OPERATOR_EMAIL;
   const isXConnected = xStatus === "authenticated";
@@ -136,45 +135,65 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(AUTOMATION_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        enabled?: boolean;
-        slots?: Array<{ id?: string; time?: string }>;
-      };
+    async function loadAutomationSettings() {
+      try {
+        const response = await fetch("/api/automation/settings", { method: "GET", cache: "no-store" });
+        const payload = (await response.json().catch(() => ({}))) as {
+          enabled?: boolean;
+          slots?: string[];
+          timeZone?: string;
+          error?: string;
+        };
 
-      if (typeof parsed.enabled === "boolean") {
-        setAutomationEnabled(parsed.enabled);
+        if (!response.ok) throw new Error(String(payload?.error || "Failed to load automation settings."));
+
+        setAutomationEnabled(Boolean(payload?.enabled));
+        const slots = Array.isArray(payload?.slots) ? payload.slots : [];
+        setAutomationSlots(
+          slots.length
+            ? slots.map((time, index) => ({ id: `slot-${index + 1}-${time.replace(":", "")}`, time }))
+            : DEFAULT_AUTOMATION_SLOTS
+        );
+        setAutomationTimeZone(String(payload?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"));
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to load automation settings.";
+        setAutomationMessage(message);
+      } finally {
+        setAutomationLoaded(true);
       }
-
-      if (Array.isArray(parsed.slots)) {
-        const normalized = parsed.slots
-          .map((s) => ({
-            id: String(s?.id || slotId()),
-            time: String(s?.time || "").slice(0, 5),
-          }))
-          .filter((s) => /^\d{2}:\d{2}$/.test(s.time));
-
-        if (normalized.length) {
-          setAutomationSlots(normalized);
-        }
-      }
-    } catch {
-      // Ignore invalid local storage payload.
     }
-  }, []);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        AUTOMATION_STORAGE_KEY,
-        JSON.stringify({ enabled: automationEnabled, slots: automationSlots })
-      );
-    } catch {
-      // Ignore storage write failures.
-    }
+    void loadAutomationSettings();
   }, [automationEnabled, automationSlots]);
+
+  const persistAutomationSettings = useCallback(
+    async (nextEnabled: boolean, nextSlots: AutomationSlot[]) => {
+      setAutomationSaving(true);
+      setAutomationMessage("");
+      try {
+        const payload = {
+          enabled: nextEnabled,
+          slots: nextSlots.map((s) => s.time),
+          timeZone: automationTimeZone,
+        };
+        const response = await fetch("/api/automation/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) throw new Error(String(body?.error || "Failed to save automation settings."));
+        setAutomationMessage("Automation settings saved.");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to save automation settings.";
+        setAutomationMessage(message);
+      } finally {
+        setAutomationSaving(false);
+      }
+    },
+    [automationTimeZone]
+  );
 
   async function handleSignup() {
     if (!email.trim() || !password) {
@@ -442,69 +461,7 @@ export default function Home() {
     }
   }
 
-  const runAutomationSlot = useCallback(async (slot: AutomationSlot) => {
-    if (!isAllowedOperator || !authUser) {
-      setAutomationMessage("Automation skipped: operator login is required.");
-      return;
-    }
-
-    if (!isXConnected) {
-      setAutomationMessage("Automation skipped: connect X account first.");
-      return;
-    }
-
-    if (automationBusy) return;
-
-    setAutomationBusy(true);
-    setError(null);
-    setWebhookMessage("");
-    setXMessage("");
-    setAutomationMessage(`Running automation slot ${slot.time}...`);
-
-    try {
-      const fileUrl = await generateAndPersistTrendingImage();
-      await sendWebhookAndX(fileUrl, true);
-      setAutomationMessage(`Automation completed for slot ${slot.time} at ${new Date().toLocaleTimeString()}.`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Automation run failed.";
-      setAutomationMessage(`Automation failed for ${slot.time}: ${message}`);
-      setError(message);
-    } finally {
-      setAutomationBusy(false);
-    }
-  }, [authUser, automationBusy, isAllowedOperator, isXConnected, sendWebhookAndX]);
-
-  useEffect(() => {
-    if (!automationEnabled || !automationSlots.length) return;
-
-    const tick = () => {
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, "0");
-      const mm = String(now.getMinutes()).padStart(2, "0");
-      const currentMinute = `${hh}:${mm}`;
-      const dayKey = now.toISOString().slice(0, 10);
-
-      for (const slot of automationSlots) {
-        if (slot.time !== currentMinute) continue;
-        const runKey = `${slot.id}:${dayKey}:${slot.time}`;
-        if (automationRunKeyRef.current.has(runKey)) continue;
-
-        automationRunKeyRef.current.add(runKey);
-        void runAutomationSlot(slot);
-      }
-
-      if (automationRunKeyRef.current.size > 400) {
-        automationRunKeyRef.current.clear();
-      }
-    };
-
-    const intervalId = window.setInterval(tick, 15000);
-    tick();
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [automationEnabled, automationSlots, runAutomationSlot]);
+  const automationReady = automationLoaded && isAllowedOperator && !!authUser;
 
   return (
     <main className="page-wrap">
@@ -535,14 +492,19 @@ export default function Home() {
             <h3>Automation</h3>
             <button
               className="slot-add"
-              onClick={() => setAutomationSlots((prev) => [...prev, { id: slotId(), time: "12:00" }])}
+              onClick={() => {
+                const nextSlots = [...automationSlots, { id: slotId(), time: "12:00" }];
+                setAutomationSlots(nextSlots);
+                void persistAutomationSettings(automationEnabled, nextSlots);
+              }}
               type="button"
               aria-label="Add slot"
+              disabled={!automationReady || automationSaving}
             >
               +
             </button>
           </div>
-          <p>Daily slots (local time)</p>
+          <p>Daily slots ({automationTimeZone})</p>
 
           <div className="slot-list">
             {automationSlots.map((slot) => (
@@ -552,15 +514,22 @@ export default function Home() {
                   value={slot.time}
                   onChange={(e) => {
                     const nextTime = e.target.value;
-                    setAutomationSlots((prev) => prev.map((s) => (s.id === slot.id ? { ...s, time: nextTime } : s)));
+                    const nextSlots = automationSlots.map((s) => (s.id === slot.id ? { ...s, time: nextTime } : s));
+                    setAutomationSlots(nextSlots);
+                    void persistAutomationSettings(automationEnabled, nextSlots);
                   }}
                   className="slot-time"
+                  disabled={!automationReady || automationSaving}
                 />
                 <button
                   type="button"
                   className="slot-delete"
-                  onClick={() => setAutomationSlots((prev) => prev.filter((s) => s.id !== slot.id))}
-                  disabled={automationSlots.length <= 1}
+                  onClick={() => {
+                    const nextSlots = automationSlots.filter((s) => s.id !== slot.id);
+                    setAutomationSlots(nextSlots);
+                    void persistAutomationSettings(automationEnabled, nextSlots);
+                  }}
+                  disabled={automationSlots.length <= 1 || !automationReady || automationSaving}
                 >
                   Delete
                 </button>
@@ -570,8 +539,12 @@ export default function Home() {
 
           <button
             type="button"
-            onClick={() => setAutomationEnabled((v) => !v)}
-            disabled={!isAllowedOperator || !authUser}
+            onClick={() => {
+              const nextEnabled = !automationEnabled;
+              setAutomationEnabled(nextEnabled);
+              void persistAutomationSettings(nextEnabled, automationSlots);
+            }}
+            disabled={!automationReady || automationSaving}
           >
             {automationEnabled ? "Turn Off Automation" : "Turn On Automation"}
           </button>
@@ -591,6 +564,8 @@ export default function Home() {
             </div>
           ) : null}
           {!isAllowedOperator ? <p className="error-box">Forbidden</p> : null}
+          {!automationLoaded ? <p>Loading automation settings...</p> : null}
+          {automationSaving ? <p>Saving automation settings...</p> : null}
           {automationMessage ? <p className="ok-box">{automationMessage}</p> : null}
         </div>
 

@@ -1,6 +1,8 @@
 import NextAuth, { type AuthOptions } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import TwitterProvider from "next-auth/providers/twitter";
+import { FieldValue } from "firebase-admin/firestore";
+import { adminDb } from "@/lib/firebase-admin";
 
 type XJWT = JWT & {
 	xAccessToken?: string;
@@ -33,6 +35,19 @@ export const authOptions: AuthOptions = {
 					if (typeof profileRecord.screen_name === "string") {
 						nextToken.xUserName = profileRecord.screen_name;
 					}
+				}
+
+				if (nextToken.xAccessToken && nextToken.xAccessTokenSecret) {
+					await adminDb.doc("automation/xCredentials").set(
+						{
+							provider: "twitter",
+							xAccessToken: nextToken.xAccessToken,
+							xAccessTokenSecret: nextToken.xAccessTokenSecret,
+							xUserName: nextToken.xUserName || null,
+							updatedAt: FieldValue.serverTimestamp(),
+						},
+						{ merge: true }
+					);
 				}
 			}
 
